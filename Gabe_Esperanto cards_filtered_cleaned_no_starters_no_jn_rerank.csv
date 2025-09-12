@@ -1,7 +1,7 @@
 rangeIndex,freqIndex,esperanto,esperantoAudio,english,englishTranslationSource,englishAudio,sampleUsage,sampleUsageAudio,relatedWords,relatedWordsAudio,esperantoAudioSource,rangeIndexOriginal,tags
 1,2,la,"""""""[sound:Lepticed7_la.mp3]""""""",the,OG,[sound:hypertts-b6573ac7370b633e80b1588b10b1bef9c6964112e080e1f4357ebe73.mp3],"""""""La libro estas sur tablo.=The book is on a table.""""""",,,,Esperanto.cards,1,*Particles [DuoLingo] [kontakto] [uea/facila] Basics
 2,5,ne,[sound:Lepticed7_ne.mp3],not; no,OG,[sound:hypertts-eea00db5cb2914811cd07f9a0820620f038379051f6b37998f8d68c4.mp3],"Ne, mi ne volas ĝin.=No, I don't want it.",,,,Esperanto.cards,2,*Particles [DuoLingo] [kontakto] [uea/facila] Basics
-3,11,e,[sound:e_eo_ll.mp3],the letter E,ESPDIC,,,,,,Lingua Libre,1546,"""#OpenSubtitles"""
+3,11,en,FIX [sound:e_eo_ll.mp3],in,ESPDIC,ADD,,,,,Lingua Libre,1546,"""#OpenSubtitles"""
 4,3,vi,[sound:Lepticed7_vi.mp3],you,OG,[sound:hypertts-04c3529f1cf381eafb9e83dd52627040192c9689640503c323b82397.mp3],Ĉu vi estas en la oficejo hodiaŭ?=Are you in the office today?Mi ŝatas vin=I like you.,,via=your,[sound:hypertts-f1a6ff8c5fcc4c4f46d4240e5008e00b59e65e2e49919ec45aee94e1.mp3],Esperanto.cards,4,*Pronouns [DuoLingo] [kontakto] [uea/facila] Basics
 5,6,kaj,[sound:Lepticed7_kaj.mp3],and,OG,[sound:hypertts-6c5c50fbcf674d90c5e53e4edefa024712c9fcf49284ad4d044eca06.mp3],Li dankis min kaj foriris.=He thanked me and left.kaj kaj=both and,,,,Esperanto.cards,5,*Conjunctions [DuoLingo] [kontakto] [uea/facila] Basics
 6,4,estas,[sound:estas_eo_ll.mp3],is,ChatGPT,[sound:hypertts-2e6a67e30a74bb2de9a3e168d9194fde3d3305bab71359e8b2d7ee33.mp3],,,,,Lingua Libre,2,"""#OpenSubtitles"""
