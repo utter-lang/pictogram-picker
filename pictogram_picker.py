@@ -193,7 +193,6 @@ class StartPage:
             ):
                 return
         new_df = self.controller.base_vocab_df.copy()
-        # --- MODIFIED: Add the new column when creating a new file ---
         for col in [
             "symbol_filename",
             "symbol_name",
@@ -315,6 +314,26 @@ class SymbolPickerPage:
             self.sclera_df = pd.DataFrame(sclera_data)
             print(f"Loaded {len(self.sclera_df)} Sclera symbols.")
 
+            # Pre-load Bliss Symbols from filenames
+            print("Loading Bliss symbols...")
+            bliss_path = "bliss_h1000_bmp"  # UPDATED to look for a BMP folder
+            bliss_data = []
+            if os.path.isdir(bliss_path):
+                for filename in os.listdir(bliss_path):
+                    if filename.endswith(".bmp"):  # UPDATED to look for .bmp files
+                        symbol_name, _ = os.path.splitext(filename)
+                        bliss_data.append(
+                            {
+                                "name": symbol_name.replace("-", " "),
+                                "path": os.path.join(bliss_path, filename),
+                            }
+                        )
+                self.bliss_df = pd.DataFrame(bliss_data)
+                print(f"Loaded {len(self.bliss_df)} Bliss symbols.")
+            else:
+                print(f"Warning: Bliss symbol directory '{bliss_path}' not found. Skipping.")
+                self.bliss_df = pd.DataFrame()
+
         except FileNotFoundError as e:
             messagebox.showerror(
                 "Error",
@@ -346,7 +365,6 @@ class SymbolPickerPage:
         self.root.bind("<KeyPress>", self.on_key_press)
 
     def setup_gui(self):
-        # This setup is now only run once
         self.main_frame = ctk.CTkFrame(self.master, fg_color="transparent")
         self.main_frame.grid(
             row=0,
@@ -357,10 +375,7 @@ class SymbolPickerPage:
         )
         self.main_frame.grid_columnconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(2, weight=1)
-
         button_ipadding = int(BUTTON_IPAD * UI_SCALE / 2)
-
-        # --- Fonts and Frames setup (condensed for brevity) ---
         self.italic_font, self.normal_font, self.header_font = [
             ctk.CTkFont(family="Arial", size=int(s * UI_SCALE), **k)
             for s, k in [
@@ -551,6 +566,7 @@ class SymbolPickerPage:
             "OpenMoji",
             "Picom",
             "Sclera",
+            "Bliss",
             "ARASAAC",
             "Flaticon",
         ]:
@@ -608,25 +624,18 @@ class SymbolPickerPage:
         self.grid_row, self.grid_col, self.selected_index = 0, 0, -1
         self.symbol_buttons = []
         self.flaticon_button.configure(state="normal")
-
-        # 1. Process all fast, local searches first
         self.process_local_search_batch(self.search_mulberry(query), "Mulberry")
         self.process_local_search_batch(self.search_openmoji(query), "OpenMoji")
         self.process_local_search_batch(self.search_picom(query), "Picom")
         self.process_local_search_batch(self.search_sclera(query), "Sclera")
-
-        # 2. Synchronously check the ARASAAC cache
+        self.process_local_search_batch(self.search_bliss(query), "Bliss")
         arasaac_cache_results = self.check_arasaac_cache(query, self.current_index)
         self.process_local_search_batch(arasaac_cache_results, "ARASAAC")
-
-        # 3. Start threaded search for ARASAAC if not in cache
         sources_to_search = []
         if not arasaac_cache_results:
             sources_to_search.append("ARASAAC")
-
         if "ARASAAC" in sources_to_search:
             self.display_header("ARASAAC")
-
         self.start_threaded_searches(query, sources=sources_to_search)
         self.process_queue()
 
@@ -649,7 +658,6 @@ class SymbolPickerPage:
         self.flaticon_button.configure(state="disabled")
         self.display_header("Flaticon")
         query = self.custom_search_entry.get().strip() or self.current_word
-        # Manually start the Flaticon search thread
         self.start_threaded_searches(query, sources=["Flaticon"])
 
     def run_search_in_thread(self, search_func, query, source, search_id):
@@ -657,10 +665,8 @@ class SymbolPickerPage:
             symbol_metadata_generator = search_func(query, self.current_index)
         else:
             symbol_metadata_generator = search_func(query)
-
         if not symbol_metadata_generator:
             return
-
         for symbol in symbol_metadata_generator:
             if search_id != self.current_search_id:
                 return
@@ -678,7 +684,6 @@ class SymbolPickerPage:
                     self.results_queue.put(
                         ("SYMBOL", source, symbol, image_data, search_id)
                     )
-
             except Exception as e:
                 print(f"Error processing symbol '{symbol.get('name')}' in thread: {e}")
 
@@ -725,8 +730,13 @@ class SymbolPickerPage:
                 image_data = cairosvg.svg2png(
                     url=data, output_width=current_size, output_height=current_size
                 )
+            # RASTER_DATA handles both PNG and BMP from local files
+            elif data_type == "raster_data":
+                image_data = data
+            # png_data is for data coming from web requests (Flaticon, ARASAAC)
             elif data_type == "png_data":
                 image_data = data
+                
             image = Image.open(BytesIO(image_data))
             ctk_image = ctk.CTkImage(
                 light_image=image, size=(current_size, current_size)
@@ -766,18 +776,18 @@ class SymbolPickerPage:
         for symbol in symbols:
             try:
                 if "path" in symbol:
-                    data = symbol["path"]
-                    data_type = "svg_path" if data.endswith(".svg") else "png_data"
-                    if data_type == "png_data":
-                        with open(data, "rb") as f:
-                            image_data = f.read()
-                        self.cached_results[source].append(
-                            (symbol, image_data, "png_data")
-                        )
-                        self.display_symbol(source, symbol, image_data, "png_data")
-                    else:  # svg
-                        self.cached_results[source].append((symbol, data, "svg_path"))
-                        self.display_symbol(source, symbol, data, "svg_path")
+                    path = symbol["path"]
+                    # Determine if vector or raster based on file extension
+                    if path.endswith(".svg"):
+                        data_type = "svg_path"
+                        self.cached_results[source].append((symbol, path, data_type))
+                        self.display_symbol(source, symbol, path, data_type)
+                    elif path.endswith((".png", ".bmp")): # Check for both PNG and BMP
+                        data_type = "raster_data"
+                        with open(path, "rb") as f:
+                            data = f.read()
+                        self.cached_results[source].append((symbol, data, data_type))
+                        self.display_symbol(source, symbol, data, data_type)
             except Exception as e:
                 print(f"Error processing local symbol '{symbol.get('name')}': {e}")
 
@@ -857,14 +867,10 @@ class SymbolPickerPage:
         if not self.symbol_buttons or self.selected_index == -1:
             return
         key, new_index = event.keysym, self.selected_index
-        if key == "Right":
-            new_index += 1
-        elif key == "Left":
-            new_index -= 1
-        elif key == "Down":
-            new_index += MAX_GRID_COLUMNS
-        elif key == "Up":
-            new_index -= MAX_GRID_COLUMNS
+        if key == "Right": new_index += 1
+        elif key == "Left": new_index -= 1
+        elif key == "Down": new_index += MAX_GRID_COLUMNS
+        elif key == "Up": new_index -= MAX_GRID_COLUMNS
         elif key == "Return":
             self.symbol_buttons[self.selected_index].invoke()
             return
@@ -906,15 +912,11 @@ class SymbolPickerPage:
                 if not os.path.splitext(base_name)[1]:
                     base_name += ".png"
                 filename = f"{sanitized_word}_{source}_{base_name}"
-
                 with open(os.path.join(SELECTED_SYMBOLS_DIR, filename), "wb") as f:
                     shutil.copyfileobj(response.raw, f)
             else:
-                raise FileNotFoundError(
-                    f"Symbol data is missing 'path' or 'url': {symbol}"
-                )
+                raise FileNotFoundError(f"Symbol data is missing 'path' or 'url': {symbol}")
 
-            # --- MODIFIED: Save the new column to the DataFrame ---
             self.output_df.loc[
                 self.current_index,
                 [
@@ -929,7 +931,6 @@ class SymbolPickerPage:
                 source,
                 symbol.get("original_filename", "N/A"),
             ]
-
             self.auto_save()
             self.next_word()
         except Exception as e:
@@ -950,8 +951,7 @@ class SymbolPickerPage:
             self.search_for_symbols()
 
     def auto_save(self):
-        if not self.autosave_var.get():
-            return
+        if not self.autosave_var.get(): return
         self.save_to_current_file()
 
     def save_to_current_file(self):
@@ -981,21 +981,10 @@ class SymbolPickerPage:
         try:
             df = self.mulberry_df.copy()
             df["search_term"] = df["symbol-en"].str.replace("_", " ")
-            df["score"] = df["search_term"].apply(
-                lambda x: fuzz.token_sort_ratio(query, str(x))
-            )
-            # --- MODIFIED: Add original_filename ---
+            df["score"] = df["search_term"].apply(lambda x: fuzz.token_sort_ratio(query, str(x)))
             return [
-                {
-                    "name": row["symbol-en"],
-                    "path": os.path.join(
-                        "mulberry-symbols", "EN-symbols", f"{row['symbol-en']}.svg"
-                    ),
-                    "original_filename": f"{row['symbol-en']}.svg",
-                }
-                for _, row in df.sort_values(by="score", ascending=False)
-                .head(4)
-                .iterrows()
+                {"name": row["symbol-en"], "path": os.path.join("mulberry-symbols", "EN-symbols", f"{row['symbol-en']}.svg"), "original_filename": f"{row['symbol-en']}.svg"}
+                for _, row in df.sort_values(by="score", ascending=False).head(4).iterrows()
             ]
         except Exception as e:
             print(f"Error searching Mulberry: {e}")
@@ -1004,24 +993,11 @@ class SymbolPickerPage:
     def search_openmoji(self, query):
         try:
             df = self.openmoji_df.copy()
-            df["search_term"] = (
-                df["annotation"].fillna("") + " " + df["tags"].fillna("")
-            )
-            df["score"] = df["search_term"].apply(
-                lambda x: fuzz.token_sort_ratio(query, str(x))
-            )
-            # --- MODIFIED: Add original_filename ---
+            df["search_term"] = df["annotation"].fillna("") + " " + df["tags"].fillna("")
+            df["score"] = df["search_term"].apply(lambda x: fuzz.token_sort_ratio(query, str(x)))
             return [
-                {
-                    "name": row["annotation"],
-                    "path": os.path.join(
-                        "openmoji-618x618-color", "emojis", f"{row['hexcode']}.png"
-                    ),
-                    "original_filename": f"{row['hexcode']}.png",
-                }
-                for _, row in df.sort_values(by="score", ascending=False)
-                .head(4)
-                .iterrows()
+                {"name": row["annotation"], "path": os.path.join("openmoji-618x618-color", "emojis", f"{row['hexcode']}.png"), "original_filename": f"{row['hexcode']}.png"}
+                for _, row in df.sort_values(by="score", ascending=False).head(4).iterrows()
             ]
         except Exception as e:
             print(f"Error searching OpenMoji: {e}")
@@ -1030,19 +1006,10 @@ class SymbolPickerPage:
     def search_picom(self, query):
         try:
             df = self.picom_df.copy()
-            df["score"] = df["name"].apply(
-                lambda x: fuzz.token_sort_ratio(query, str(x))
-            )
-            # --- MODIFIED: Add original_filename ---
+            df["score"] = df["name"].apply(lambda x: fuzz.token_sort_ratio(query, str(x)))
             return [
-                {
-                    "name": row["name"],
-                    "path": row["path"],
-                    "original_filename": os.path.basename(row["path"]),
-                }
-                for _, row in df.sort_values(by="score", ascending=False)
-                .head(4)
-                .iterrows()
+                {"name": row["name"], "path": row["path"], "original_filename": os.path.basename(row["path"])}
+                for _, row in df.sort_values(by="score", ascending=False).head(4).iterrows()
             ]
         except Exception as e:
             print(f"Error searching Picom symbols: {e}")
@@ -1051,64 +1018,42 @@ class SymbolPickerPage:
     def search_sclera(self, query):
         try:
             df = self.sclera_df.copy()
-            df["score"] = df["search_term"].apply(
-                lambda x: fuzz.token_sort_ratio(query, str(x))
-            )
-            # --- MODIFIED: Add original_filename ---
+            df["score"] = df["search_term"].apply(lambda x: fuzz.token_sort_ratio(query, str(x)))
             return [
-                {
-                    "name": row["name"],
-                    "path": row["path"],
-                    "original_filename": os.path.basename(row["path"]),
-                }
-                for _, row in df.sort_values(by="score", ascending=False)
-                .head(4)
-                .iterrows()
+                {"name": row["name"], "path": row["path"], "original_filename": os.path.basename(row["path"])}
+                for _, row in df.sort_values(by="score", ascending=False).head(4).iterrows()
             ]
         except Exception as e:
             print(f"Error searching Sclera symbols: {e}")
             return []
 
-    def check_arasaac_cache(self, query, current_index):
-        if self.arasaac_metadata_df.empty:
+    def search_bliss(self, query):
+        try:
+            if self.bliss_df.empty: return []
+            df = self.bliss_df.copy()
+            df["score"] = df["name"].apply(lambda x: fuzz.token_sort_ratio(query, str(x)))
+            return [
+                {"name": row["name"], "path": row["path"], "original_filename": os.path.basename(row["path"])}
+                for _, row in df.sort_values(by="score", ascending=False).head(4).iterrows()
+            ]
+        except Exception as e:
+            print(f"Error searching Bliss symbols: {e}")
             return []
 
-        cached_entries = self.arasaac_metadata_df[
-            (self.arasaac_metadata_df["search_term"] == query)
-            & (self.arasaac_metadata_df["search_index"] == current_index)
-        ]
-
+    def check_arasaac_cache(self, query, current_index):
+        if self.arasaac_metadata_df.empty: return []
+        cached_entries = self.arasaac_metadata_df[(self.arasaac_metadata_df["search_term"] == query) & (self.arasaac_metadata_df["search_index"] == current_index)]
         if not cached_entries.empty:
             print(f"Found ARASAAC results for '{query}' in local cache.")
             results = []
             for _, row in cached_entries.iterrows():
                 try:
                     keywords_val = row.get("keywords")
-                    if isinstance(keywords_val, str):
-                        keywords_list = ast.literal_eval(keywords_val)
-                    else:
-                        keywords_list = keywords_val if keywords_val else []
-
-                    keyword = (
-                        keywords_list[0].get("keyword", "N/A")
-                        if keywords_list
-                        else "N/A"
-                    )
-
-                    # --- MODIFIED: Add original_filename ---
-                    results.append(
-                        {
-                            "name": keyword,
-                            "path": os.path.join(
-                                ARASAAC_CACHE_DIR, row["local_filename"]
-                            ),
-                            "original_filename": row["local_filename"],
-                        }
-                    )
+                    keywords_list = ast.literal_eval(keywords_val) if isinstance(keywords_val, str) else (keywords_val if keywords_val else [])
+                    keyword = keywords_list[0].get("keyword", "N/A") if keywords_list else "N/A"
+                    results.append({"name": keyword, "path": os.path.join(ARASAAC_CACHE_DIR, row["local_filename"]), "original_filename": row["local_filename"]})
                 except (ValueError, SyntaxError, KeyError) as e:
-                    print(
-                        f"Warning: Could not parse cached ARASAAC entry for '{query}'. Error: {e}"
-                    )
+                    print(f"Warning: Could not parse cached ARASAAC entry for '{query}'. Error: {e}")
             return results
         return []
 
@@ -1121,49 +1066,30 @@ class SymbolPickerPage:
         except Exception as e:
             print(f"Error searching ARASAAC: {e}")
             return
-
         new_metadata_rows = []
         for item in api_data[:4]:
             pictogram_id = item.get("_id")
-            if not pictogram_id:
-                continue
-
+            if not pictogram_id: continue
             try:
                 img_url = f"https://api.arasaac.org/api/pictograms/{pictogram_id}"
                 img_response = requests.get(img_url, timeout=10)
                 img_response.raise_for_status()
-
                 local_filename = f"{pictogram_id}.png"
                 local_filepath = os.path.join(ARASAAC_CACHE_DIR, local_filename)
                 with open(local_filepath, "wb") as f:
                     f.write(img_response.content)
-
                 metadata_row = item.copy()
                 metadata_row["search_term"] = query
                 metadata_row["search_index"] = current_index
                 metadata_row["local_filename"] = local_filename
                 new_metadata_rows.append(metadata_row)
-
-                # --- MODIFIED: Add original_filename ---
-                yield {
-                    "name": item.get("keywords", [{}])[0].get("keyword", "N/A"),
-                    "path": local_filepath,
-                    "original_filename": local_filename,
-                }
+                yield {"name": item.get("keywords", [{}])[0].get("keyword", "N/A"), "path": local_filepath, "original_filename": local_filename}
             except Exception as e:
                 print(f"Failed to download/save ARASAAC pictogram {pictogram_id}: {e}")
-
         if new_metadata_rows:
             new_df = pd.DataFrame(new_metadata_rows)
-            self.arasaac_metadata_df = pd.concat(
-                [self.arasaac_metadata_df, new_df], ignore_index=True
-            )
-            new_df.to_csv(
-                self.arasaac_metadata_path,
-                mode="a",
-                header=not os.path.exists(self.arasaac_metadata_path),
-                index=False,
-            )
+            self.arasaac_metadata_df = pd.concat([self.arasaac_metadata_df, new_df], ignore_index=True)
+            new_df.to_csv(self.arasaac_metadata_path, mode="a", header=not os.path.exists(self.arasaac_metadata_path), index=False)
 
     def search_flaticon(self, query):
         if FLATICON_API_KEY == "YOUR_FLATICON_API_KEY" or not FLATICON_API_KEY:
@@ -1172,48 +1098,27 @@ class SymbolPickerPage:
         headers = {"x-freepik-api-key": FLATICON_API_KEY, "Accept": "application/json"}
         try:
             search_params = {"term": query, "limit": 4, "order": "relevance"}
-            search_response = requests.get(
-                FLATICON_API_URLS["search"],
-                headers=headers,
-                params=search_params,
-                timeout=10,
-            )
+            search_response = requests.get(FLATICON_API_URLS["search"], headers=headers, params=search_params, timeout=10)
             search_response.raise_for_status()
             search_data = search_response.json()
         except Exception as e:
             print(f"Error during Flaticon search step: {e}")
-            if "search_response" in locals():
-                print(f"Search Response Text: {search_response.text}")
+            if "search_response" in locals(): print(f"Search Response Text: {search_response.text}")
             return
-
         for item in search_data.get("data", [])[:4]:
             try:
                 icon_id, icon_name = item.get("id"), item.get("name", "N/A")
-                if not icon_id:
-                    continue
+                if not icon_id: continue
                 download_url = FLATICON_API_URLS["download"].format(id=icon_id)
-                download_response = requests.get(
-                    download_url, headers=headers, params={"format": "png"}, timeout=10
-                )
+                download_response = requests.get(download_url, headers=headers, params={"format": "png"}, timeout=10)
                 download_response.raise_for_status()
                 final_url = download_response.json().get("data", {}).get("url")
                 if final_url:
-                    # --- MODIFIED: Add original_filename ---
-                    sanitized_name = (
-                        "".join(c for c in icon_name if c.isalnum() or c in " _-")
-                        .strip()
-                        .replace(" ", "_")
-                    )
+                    sanitized_name = "".join(c for c in icon_name if c.isalnum() or c in " _-").strip().replace(" ", "_")
                     original_filename = f"{sanitized_name}_{icon_id}.png"
-                    yield {
-                        "name": icon_name,
-                        "url": final_url,
-                        "original_filename": original_filename,
-                    }
+                    yield {"name": icon_name, "url": final_url, "original_filename": original_filename}
             except Exception as e:
-                print(
-                    f"  -> ERROR getting download link for icon ID {item.get('id')}: {e}"
-                )
+                print(f"  -> ERROR getting download link for icon ID {item.get('id')}: {e}")
                 continue
 
 
