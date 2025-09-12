@@ -548,7 +548,6 @@ class SymbolPickerPage:
         self.symbol_buttons = []
         self.flaticon_button.configure(state="normal")
 
-        # --- MODIFIED LOGIC ---
         # 1. Process all fast, local searches first
         self.process_local_search_batch(self.search_mulberry(query), "Mulberry")
         self.process_local_search_batch(self.search_openmoji(query), "OpenMoji")
@@ -557,23 +556,24 @@ class SymbolPickerPage:
         arasaac_cache_results = self.check_arasaac_cache(query, self.current_index)
         self.process_local_search_batch(arasaac_cache_results, "ARASAAC")
 
-        # 3. Start threaded searches for web results
-        # Only search ARASAAC API if results were not found in the cache
-        sources_to_search = ["Flaticon"]
+        # 3. Start threaded search for ARASAAC if not in cache
+        # --- MODIFIED BLOCK ---
+        sources_to_search = []  # Start with no web searches
         if not arasaac_cache_results:
             sources_to_search.append("ARASAAC")
 
-        self.display_header("Flaticon")
         if "ARASAAC" in sources_to_search:
             self.display_header("ARASAAC")
 
+        # Do not automatically search Flaticon
         self.start_threaded_searches(query, sources=sources_to_search)
+        # --- END MODIFIED BLOCK ---
         self.process_queue()
 
-    def start_threaded_searches(self, query, sources=["Flaticon"]):
+    def start_threaded_searches(self, query, sources=[]):  # Default to empty list
         search_map = {
             "Flaticon": self.search_flaticon,
-            "ARASAAC": self.search_arasaac,  # The new API-only function
+            "ARASAAC": self.search_arasaac,
         }
         for source_name in sources:
             if source_name in search_map:
@@ -589,21 +589,22 @@ class SymbolPickerPage:
         self.flaticon_button.configure(state="disabled")
         self.display_header("Flaticon")
         query = self.custom_search_entry.get().strip() or self.current_word
+        # Manually start the Flaticon search thread
         self.start_threaded_searches(query, sources=["Flaticon"])
 
     def run_search_in_thread(self, search_func, query, source, search_id):
         # This function now handles both Flaticon and ARASAAC searches
         if source == "ARASAAC":
             # ARASAAC needs the current_index
-            symbol_metadata = search_func(query, self.current_index)
+            symbol_metadata_generator = search_func(query, self.current_index)
         else:
             # Flaticon just needs the query
-            symbol_metadata = search_func(query)
+            symbol_metadata_generator = search_func(query)
 
-        if not symbol_metadata:
+        if not symbol_metadata_generator:
             return
 
-        for symbol in symbol_metadata:
+        for symbol in symbol_metadata_generator:
             if search_id != self.current_search_id:
                 return  # Stop if a new search has been started
             try:
@@ -1005,7 +1006,7 @@ class SymbolPickerPage:
             api_data = response.json()
         except Exception as e:
             print(f"Error searching ARASAAC: {e}")
-            return # A generator just returns to stop iteration
+            return  # A generator just returns to stop iteration
 
         new_metadata_rows = []
         for item in api_data[:4]:  # Limit to 4 results
@@ -1013,7 +1014,7 @@ class SymbolPickerPage:
             if not pictogram_id:
                 continue
 
-            try:            
+            try:
                 img_url = f"https://api.arasaac.org/api/pictograms/{pictogram_id}"
                 img_response = requests.get(img_url, timeout=10)
                 img_response.raise_for_status()
@@ -1049,11 +1050,12 @@ class SymbolPickerPage:
                 header=not os.path.exists(self.arasaac_metadata_path),
                 index=False,
             )
-            
+
     def search_flaticon(self, query):
+        # This function is now a generator
         if FLATICON_API_KEY == "YOUR_FLATICON_API_KEY" or not FLATICON_API_KEY:
             print("Flaticon API key not set. Skipping search.")
-            return []
+            return
         headers = {"x-freepik-api-key": FLATICON_API_KEY, "Accept": "application/json"}
         try:
             search_params = {"term": query, "limit": 4, "order": "relevance"}
@@ -1069,8 +1071,8 @@ class SymbolPickerPage:
             print(f"Error during Flaticon search step: {e}")
             if "search_response" in locals():
                 print(f"Search Response Text: {search_response.text}")
-            return []
-        results = []
+            return
+
         for item in search_data.get("data", []):
             try:
                 icon_id, icon_name = item.get("id"), item.get("name", "N/A")
@@ -1083,13 +1085,12 @@ class SymbolPickerPage:
                 download_response.raise_for_status()
                 final_url = download_response.json().get("data", {}).get("url")
                 if final_url:
-                    results.append({"name": icon_name, "url": final_url})
+                    yield {"name": icon_name, "url": final_url}
             except Exception as e:
                 print(
                     f"  -> ERROR getting download link for icon ID {item.get('id')}: {e}"
                 )
                 continue
-        return results
 
 
 if __name__ == "__main__":
