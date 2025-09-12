@@ -12,6 +12,7 @@ import threading
 from queue import Queue
 from dotenv import load_dotenv
 import ast
+import time
 
 # --- UI Sizing Constants ---
 UI_SCALE = 1.25
@@ -262,9 +263,31 @@ class SymbolPickerPage:
             self.openmoji_df = pd.read_csv(
                 os.path.join("openmoji-618x618-color", "metadata.csv")
             )
+
+            # --- Pre-load Picom Symbols from filenames ---
+            print("Loading Picom symbols...")
+            picom_path = "picom-symbols/picom-og-symbols"
+            picom_data = []
+            for filename in os.listdir(picom_path):
+                if filename.endswith(".png"):
+                    base_name, _ = os.path.splitext(filename)
+                    # Split only on the last underscore to get the name
+                    parts = base_name.rsplit("_", 1)
+                    if len(parts) == 2:
+                        symbol_name = parts[0]
+                        picom_data.append(
+                            {
+                                "name": symbol_name,
+                                "path": os.path.join(picom_path, filename),
+                            }
+                        )
+            self.picom_df = pd.DataFrame(picom_data)
+            print(f"Loaded {len(self.picom_df)} Picom symbols.")
+
         except FileNotFoundError as e:
             messagebox.showerror(
-                "Error", f"Could not find a required local symbol file: {e.filename}"
+                "Error",
+                f"Could not find a required local symbol file or directory: {e}",
             )
             self.controller.show_start_page()
             return
@@ -492,7 +515,7 @@ class SymbolPickerPage:
             widget.destroy()
         self.grid_row, self.grid_col, self.selected_index = 0, 0, -1
         self.symbol_buttons = []
-        for source in ["Mulberry", "OpenMoji", "ARASAAC", "Flaticon"]:
+        for source in ["Mulberry", "OpenMoji", "Picom", "ARASAAC", "Flaticon"]:
             if source in self.cached_results:
                 self.display_header(source)
                 for symbol, data, data_type in self.cached_results[source]:
@@ -551,26 +574,24 @@ class SymbolPickerPage:
         # 1. Process all fast, local searches first
         self.process_local_search_batch(self.search_mulberry(query), "Mulberry")
         self.process_local_search_batch(self.search_openmoji(query), "OpenMoji")
+        self.process_local_search_batch(self.search_picom(query), "Picom")
 
         # 2. Synchronously check the ARASAAC cache
         arasaac_cache_results = self.check_arasaac_cache(query, self.current_index)
         self.process_local_search_batch(arasaac_cache_results, "ARASAAC")
 
         # 3. Start threaded search for ARASAAC if not in cache
-        # --- MODIFIED BLOCK ---
-        sources_to_search = []  # Start with no web searches
+        sources_to_search = []
         if not arasaac_cache_results:
             sources_to_search.append("ARASAAC")
 
         if "ARASAAC" in sources_to_search:
             self.display_header("ARASAAC")
 
-        # Do not automatically search Flaticon
         self.start_threaded_searches(query, sources=sources_to_search)
-        # --- END MODIFIED BLOCK ---
         self.process_queue()
 
-    def start_threaded_searches(self, query, sources=[]):  # Default to empty list
+    def start_threaded_searches(self, query, sources=[]):
         search_map = {
             "Flaticon": self.search_flaticon,
             "ARASAAC": self.search_arasaac,
@@ -593,12 +614,9 @@ class SymbolPickerPage:
         self.start_threaded_searches(query, sources=["Flaticon"])
 
     def run_search_in_thread(self, search_func, query, source, search_id):
-        # This function now handles both Flaticon and ARASAAC searches
         if source == "ARASAAC":
-            # ARASAAC needs the current_index
             symbol_metadata_generator = search_func(query, self.current_index)
         else:
-            # Flaticon just needs the query
             symbol_metadata_generator = search_func(query)
 
         if not symbol_metadata_generator:
@@ -606,9 +624,8 @@ class SymbolPickerPage:
 
         for symbol in symbol_metadata_generator:
             if search_id != self.current_search_id:
-                return  # Stop if a new search has been started
+                return
             try:
-                # Flaticon provides a direct URL to the final image
                 if "url" in symbol and source == "Flaticon":
                     response = requests.get(symbol["url"], stream=True, timeout=10)
                     response.raise_for_status()
@@ -616,7 +633,6 @@ class SymbolPickerPage:
                     self.results_queue.put(
                         ("SYMBOL", source, symbol, image_data, search_id)
                     )
-                # ARASAAC provides a local path to the downloaded image
                 elif "path" in symbol and source == "ARASAAC":
                     with open(symbol["path"], "rb") as f:
                         image_data = f.read()
@@ -955,6 +971,23 @@ class SymbolPickerPage:
             print(f"Error searching OpenMoji: {e}")
             return []
 
+    def search_picom(self, query):
+        try:
+            df = self.picom_df.copy()
+            # Use the 'name' column we created from the filenames for searching
+            df["score"] = df["name"].apply(
+                lambda x: fuzz.token_sort_ratio(query, str(x))
+            )
+            return [
+                {"name": row["name"], "path": row["path"]}
+                for _, row in df.sort_values(by="score", ascending=False)
+                .head(4)
+                .iterrows()
+            ]
+        except Exception as e:
+            print(f"Error searching Picom symbols: {e}")
+            return []
+
     def check_arasaac_cache(self, query, current_index):
         # This function synchronously checks the local cache ONLY.
         if self.arasaac_metadata_df.empty:
@@ -1051,7 +1084,6 @@ class SymbolPickerPage:
                 index=False,
             )
 
-
     def search_flaticon(self, query):
         # This function is a generator that yields results one by one
         if FLATICON_API_KEY == "YOUR_FLATICON_API_KEY" or not FLATICON_API_KEY:
@@ -1074,8 +1106,6 @@ class SymbolPickerPage:
                 print(f"Search Response Text: {search_response.text}")
             return
 
-        # --- MODIFIED LINE: Added [:4] to enforce the limit ---
-        # This ensures we only process the first 4 items, even if the API returned more.
         for item in search_data.get("data", [])[:4]:
             try:
                 icon_id, icon_name = item.get("id"), item.get("name", "N/A")
@@ -1089,8 +1119,11 @@ class SymbolPickerPage:
                 final_url = download_response.json().get("data", {}).get("url")
                 if final_url:
                     yield {"name": icon_name, "url": final_url}
+
             except Exception as e:
-                print(f"  -> ERROR getting download link for icon ID {item.get('id')}: {e}")
+                print(
+                    f"  -> ERROR getting download link for icon ID {item.get('id')}: {e}"
+                )
                 continue
 
 
