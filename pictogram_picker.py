@@ -34,7 +34,7 @@ FLATICON_API_URLS = {
     "search": "https://api.freepik.com/v1/icons",
     "download": "https://api.freepik.com/v1/icons/{id}/download",
 }
-SELECTED_SYMBOLS_DIR = "selected_symbols"
+SELECTED_SYMBOLS_DIR = "selected-symbols"
 ARASAAC_CACHE_DIR = "arasaac_symbols"  # Directory for local ARASAAC symbols
 MAX_GRID_COLUMNS = 4
 
@@ -259,19 +259,19 @@ class SymbolPickerPage:
         self.padding_map = {k: int(v * UI_SCALE) for k, v in base_padding_map.items()}
 
         try:
+            # Load Mulberry and OpenMoji
             self.mulberry_df = pd.read_csv("symbol-info.csv")
             self.openmoji_df = pd.read_csv(
                 os.path.join("openmoji-618x618-color", "metadata.csv")
             )
 
-            # --- Pre-load Picom Symbols from filenames ---
+            # Pre-load Picom Symbols from filenames
             print("Loading Picom symbols...")
             picom_path = "picom-symbols/picom-og-symbols"
             picom_data = []
             for filename in os.listdir(picom_path):
                 if filename.endswith(".png"):
                     base_name, _ = os.path.splitext(filename)
-                    # Split only on the last underscore to get the name
                     parts = base_name.rsplit("_", 1)
                     if len(parts) == 2:
                         symbol_name = parts[0]
@@ -283,6 +283,34 @@ class SymbolPickerPage:
                         )
             self.picom_df = pd.DataFrame(picom_data)
             print(f"Loaded {len(self.picom_df)} Picom symbols.")
+
+            # --- Pre-load Sclera Symbols from filenames ---
+            print("Loading Sclera symbols...")
+            sclera_path = "sclera-symbols/"
+            sclera_data = []
+            for filename in os.listdir(sclera_path):
+                if filename.endswith(".png"):
+                    base_name, _ = os.path.splitext(filename)
+                    parts = base_name.rsplit("_", 1)
+                    # Check if the last part is a number (alternate icon)
+                    if len(parts) == 2 and parts[1].isdigit():
+                        # Clean up name for searching (e.g., "alarm_clock" -> "alarm clock")
+                        search_term = parts[0].replace("-", " ").replace("_", " ")
+                        # Create a display name with the number (e.g., "alarm clock 1")
+                        display_name = f"{search_term} {parts[1]}"
+                    else:
+                        search_term = base_name.replace("-", " ").replace("_", " ")
+                        display_name = search_term
+
+                    sclera_data.append(
+                        {
+                            "name": display_name,
+                            "search_term": search_term,
+                            "path": os.path.join(sclera_path, filename),
+                        }
+                    )
+            self.sclera_df = pd.DataFrame(sclera_data)
+            print(f"Loaded {len(self.sclera_df)} Sclera symbols.")
 
         except FileNotFoundError as e:
             messagebox.showerror(
@@ -515,7 +543,14 @@ class SymbolPickerPage:
             widget.destroy()
         self.grid_row, self.grid_col, self.selected_index = 0, 0, -1
         self.symbol_buttons = []
-        for source in ["Mulberry", "OpenMoji", "Picom", "ARASAAC", "Flaticon"]:
+        for source in [
+            "Mulberry",
+            "OpenMoji",
+            "Picom",
+            "Sclera",
+            "ARASAAC",
+            "Flaticon",
+        ]:
             if source in self.cached_results:
                 self.display_header(source)
                 for symbol, data, data_type in self.cached_results[source]:
@@ -575,6 +610,7 @@ class SymbolPickerPage:
         self.process_local_search_batch(self.search_mulberry(query), "Mulberry")
         self.process_local_search_batch(self.search_openmoji(query), "OpenMoji")
         self.process_local_search_batch(self.search_picom(query), "Picom")
+        self.process_local_search_batch(self.search_sclera(query), "Sclera")
 
         # 2. Synchronously check the ARASAAC cache
         arasaac_cache_results = self.check_arasaac_cache(query, self.current_index)
@@ -986,6 +1022,23 @@ class SymbolPickerPage:
             ]
         except Exception as e:
             print(f"Error searching Picom symbols: {e}")
+            return []
+
+    def search_sclera(self, query):
+        try:
+            df = self.sclera_df.copy()
+            # Use the 'search_term' column for matching, but return the 'name' for display
+            df["score"] = df["search_term"].apply(
+                lambda x: fuzz.token_sort_ratio(query, str(x))
+            )
+            return [
+                {"name": row["name"], "path": row["path"]}
+                for _, row in df.sort_values(by="score", ascending=False)
+                .head(4)
+                .iterrows()
+            ]
+        except Exception as e:
+            print(f"Error searching Sclera symbols: {e}")
             return []
 
     def check_arasaac_cache(self, query, current_index):
