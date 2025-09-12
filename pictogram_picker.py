@@ -1,7 +1,7 @@
 import customtkinter as ctk
 from tkinter import messagebox, filedialog
 import pandas as pd
-import requests     
+import requests
 from PIL import Image
 from io import BytesIO
 from fuzzywuzzy import fuzz
@@ -548,26 +548,42 @@ class SymbolPickerPage:
         self.symbol_buttons = []
         self.flaticon_button.configure(state="normal")
 
-        # All searches are now processed synchronously and check caches where applicable
+        # --- MODIFIED LOGIC ---
+        # 1. Process all fast, local searches first
         self.process_local_search_batch(self.search_mulberry(query), "Mulberry")
         self.process_local_search_batch(self.search_openmoji(query), "OpenMoji")
-        self.process_local_search_batch(
-            self.search_arasaac(query, self.current_index), "ARASAAC"
-        )
 
-        # Flaticon remains threaded due to multiple network calls
+        # 2. Synchronously check the ARASAAC cache
+        arasaac_cache_results = self.check_arasaac_cache(query, self.current_index)
+        self.process_local_search_batch(arasaac_cache_results, "ARASAAC")
+
+        # 3. Start threaded searches for web results
+        # Only search ARASAAC API if results were not found in the cache
+        sources_to_search = ["Flaticon"]
+        if not arasaac_cache_results:
+            sources_to_search.append("ARASAAC")
+
         self.display_header("Flaticon")
-        self.start_threaded_searches(query, sources=["Flaticon"])
+        if "ARASAAC" in sources_to_search:
+            self.display_header("ARASAAC")
+
+        self.start_threaded_searches(query, sources=sources_to_search)
         self.process_queue()
 
     def start_threaded_searches(self, query, sources=["Flaticon"]):
-        for search_func, q, source_name in [(self.search_flaticon, query, "Flaticon")]:
-            thread = threading.Thread(
-                target=self.run_search_in_thread,
-                args=(search_func, q, source_name, self.current_search_id),
-            )
-            thread.daemon = True
-            thread.start()
+        search_map = {
+            "Flaticon": self.search_flaticon,
+            "ARASAAC": self.search_arasaac,  # The new API-only function
+        }
+        for source_name in sources:
+            if source_name in search_map:
+                search_func = search_map[source_name]
+                thread = threading.Thread(
+                    target=self.run_search_in_thread,
+                    args=(search_func, query, source_name, self.current_search_id),
+                )
+                thread.daemon = True
+                thread.start()
 
     def fetch_flaticon_symbols(self):
         self.flaticon_button.configure(state="disabled")
@@ -576,20 +592,37 @@ class SymbolPickerPage:
         self.start_threaded_searches(query, sources=["Flaticon"])
 
     def run_search_in_thread(self, search_func, query, source, search_id):
-        symbol_metadata = search_func(query)
+        # This function now handles both Flaticon and ARASAAC searches
+        if source == "ARASAAC":
+            # ARASAAC needs the current_index
+            symbol_metadata = search_func(query, self.current_index)
+        else:
+            # Flaticon just needs the query
+            symbol_metadata = search_func(query)
+
         if not symbol_metadata:
             return
+
         for symbol in symbol_metadata:
             if search_id != self.current_search_id:
-                return
+                return  # Stop if a new search has been started
             try:
-                if "url" in symbol:
+                # Flaticon provides a direct URL to the final image
+                if "url" in symbol and source == "Flaticon":
                     response = requests.get(symbol["url"], stream=True, timeout=10)
                     response.raise_for_status()
                     image_data = response.content
                     self.results_queue.put(
                         ("SYMBOL", source, symbol, image_data, search_id)
                     )
+                # ARASAAC provides a local path to the downloaded image
+                elif "path" in symbol and source == "ARASAAC":
+                    with open(symbol["path"], "rb") as f:
+                        image_data = f.read()
+                    self.results_queue.put(
+                        ("SYMBOL", source, symbol, image_data, search_id)
+                    )
+
             except Exception as e:
                 print(f"Error processing symbol '{symbol.get('name')}' in thread: {e}")
 
@@ -804,34 +837,27 @@ class SymbolPickerPage:
             or f"entry{self.current_index}"
         )
         try:
-            if "path" in symbol:
+            if "path" in symbol and os.path.exists(symbol["path"]):
                 original_filename = os.path.basename(symbol["path"])
                 filename = f"{sanitized_word}_{source}_{original_filename}"
                 shutil.copy(
                     symbol["path"], os.path.join(SELECTED_SYMBOLS_DIR, filename)
                 )
-            else:
+            elif "url" in symbol:
                 response = requests.get(symbol["url"], stream=True, timeout=10)
                 response.raise_for_status()
-                if "ARASAAC" in source:
-                    pictogram_id = symbol["url"].split("/")[-1]
-                    symbol_name_cleaned = (
-                        "".join(
-                            c
-                            for c in symbol["name"]
-                            if c.isalnum() or c in (" ", "_", "-")
-                        )
-                        .strip()
-                        .replace(" ", "_")
-                    )
-                    filename = f"{sanitized_word}_{source}_{symbol_name_cleaned}_{pictogram_id}.png"
-                else:
-                    base_name = os.path.basename(symbol["url"].split("?")[0])
-                    if not os.path.splitext(base_name)[1]:
-                        base_name += ".png"
-                    filename = f"{sanitized_word}_{source}_{base_name}"
+                base_name = os.path.basename(symbol["url"].split("?")[0])
+                if not os.path.splitext(base_name)[1]:
+                    base_name += ".png"
+                filename = f"{sanitized_word}_{source}_{base_name}"
+
                 with open(os.path.join(SELECTED_SYMBOLS_DIR, filename), "wb") as f:
                     shutil.copyfileobj(response.raw, f)
+            else:
+                raise FileNotFoundError(
+                    f"Symbol data is missing 'path' or 'url': {symbol}"
+                )
+
             self.output_df.loc[
                 self.current_index, ["symbol_filename", "symbol_name", "symbol_source"]
             ] = [filename, symbol["name"], source]
@@ -928,45 +954,50 @@ class SymbolPickerPage:
             print(f"Error searching OpenMoji: {e}")
             return []
 
-    def search_arasaac(self, query, current_index):
-        # Step 1: Check cache first
-        if not self.arasaac_metadata_df.empty:
-            cached_entries = self.arasaac_metadata_df[
-                (self.arasaac_metadata_df["search_term"] == query)
-                & (self.arasaac_metadata_df["search_index"] == current_index)
-            ]
-            if not cached_entries.empty:
-                print(f"Found ARASAAC results for '{query}' in local cache.")
-                # --- START: MODIFIED CODE BLOCK ---
-                results = []
-                for _, row in cached_entries.iterrows():
-                    try:
-                        # The 'keywords' column is likely a string from the CSV cache
-                        keywords_val = row.get("keywords")
-                        if isinstance(keywords_val, str):
-                            # Safely evaluate the string to a Python list
-                            keywords_list = ast.literal_eval(keywords_val)
-                        else:
-                            # It's already in the correct format (e.g., list or None)
-                            keywords_list = keywords_val if keywords_val else []
+    def check_arasaac_cache(self, query, current_index):
+        # This function synchronously checks the local cache ONLY.
+        if self.arasaac_metadata_df.empty:
+            return []
 
-                        # Ensure keywords_list is a list and not empty before indexing
-                        if isinstance(keywords_list, list) and keywords_list:
-                            keyword = keywords_list[0].get("keyword", "N/A")
-                        else:
-                            keyword = "N/A"
+        cached_entries = self.arasaac_metadata_df[
+            (self.arasaac_metadata_df["search_term"] == query)
+            & (self.arasaac_metadata_df["search_index"] == current_index)
+        ]
 
-                        results.append({
+        if not cached_entries.empty:
+            print(f"Found ARASAAC results for '{query}' in local cache.")
+            results = []
+            for _, row in cached_entries.iterrows():
+                try:
+                    keywords_val = row.get("keywords")
+                    if isinstance(keywords_val, str):
+                        keywords_list = ast.literal_eval(keywords_val)
+                    else:
+                        keywords_list = keywords_val if keywords_val else []
+
+                    keyword = (
+                        keywords_list[0].get("keyword", "N/A")
+                        if keywords_list
+                        else "N/A"
+                    )
+
+                    results.append(
+                        {
                             "name": keyword,
-                            "path": os.path.join(ARASAAC_CACHE_DIR, row["local_filename"]),
-                        })
-                    except (ValueError, SyntaxError, KeyError) as e:
-                        print(f"Warning: Could not parse cached ARASAAC entry for '{query}'. Error: {e}")
-                        continue # Skip this problematic row
-                return results
-                # --- END: MODIFIED CODE BLOCK ---
+                            "path": os.path.join(
+                                ARASAAC_CACHE_DIR, row["local_filename"]
+                            ),
+                        }
+                    )
+                except (ValueError, SyntaxError, KeyError) as e:
+                    print(
+                        f"Warning: Could not parse cached ARASAAC entry for '{query}'. Error: {e}"
+                    )
+            return results
+        return []  # Return empty list if nothing is found in the cache
 
-        # Step 2: If not in cache, call API
+    def search_arasaac(self, query, current_index):
+        # This function is now a generator that yields results as they are downloaded.
         print(f"Fetching ARASAAC results for '{query}' from API...")
         try:
             response = requests.get(f"{ARASAAC_API_URL}{query}", timeout=10)
@@ -974,17 +1005,15 @@ class SymbolPickerPage:
             api_data = response.json()
         except Exception as e:
             print(f"Error searching ARASAAC: {e}")
-            return []
+            return # A generator just returns to stop iteration
 
-        # Step 3: Process results, save to cache, and return
-        new_symbols_for_ui = []
         new_metadata_rows = []
-        for item in api_data[:4]:
+        for item in api_data[:4]:  # Limit to 4 results
             pictogram_id = item.get("_id")
             if not pictogram_id:
                 continue
 
-            try:
+            try:            
                 img_url = f"https://api.arasaac.org/api/pictograms/{pictogram_id}"
                 img_response = requests.get(img_url, timeout=10)
                 img_response.raise_for_status()
@@ -994,41 +1023,33 @@ class SymbolPickerPage:
                 with open(local_filepath, "wb") as f:
                     f.write(img_response.content)
 
-                # Prepare metadata row for saving
                 metadata_row = item.copy()
                 metadata_row["search_term"] = query
                 metadata_row["search_index"] = current_index
                 metadata_row["local_filename"] = local_filename
                 new_metadata_rows.append(metadata_row)
 
-                # Prepare data to be returned for immediate display
-                new_symbols_for_ui.append(
-                    {
-                        "name": item.get("keywords", [{}])[0].get("keyword", "N/A"),
-                        "path": local_filepath,
-                    }
-                )
+                # 'yield' sends this result back immediately for processing,
+                # instead of waiting for the others.
+                yield {
+                    "name": item.get("keywords", [{}])[0].get("keyword", "N/A"),
+                    "path": local_filepath,
+                }
             except Exception as e:
-                print(
-                    f"Failed to download or save ARASAAC pictogram {pictogram_id}: {e}"
-                )
+                print(f"Failed to download/save ARASAAC pictogram {pictogram_id}: {e}")
 
-        # Step 4: Update the metadata DataFrame and save to CSV
         if new_metadata_rows:
             new_df = pd.DataFrame(new_metadata_rows)
             self.arasaac_metadata_df = pd.concat(
                 [self.arasaac_metadata_df, new_df], ignore_index=True
             )
-            # Append to file to ensure persistence
             new_df.to_csv(
                 self.arasaac_metadata_path,
                 mode="a",
                 header=not os.path.exists(self.arasaac_metadata_path),
                 index=False,
             )
-
-        return new_symbols_for_ui
-    
+            
     def search_flaticon(self, query):
         if FLATICON_API_KEY == "YOUR_FLATICON_API_KEY" or not FLATICON_API_KEY:
             print("Flaticon API key not set. Skipping search.")
