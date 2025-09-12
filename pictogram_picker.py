@@ -11,6 +11,7 @@ import cairosvg
 import threading
 from queue import Queue
 from dotenv import load_dotenv
+import ast
 
 # --- UI Sizing Constants ---
 UI_SCALE = 1.25
@@ -936,13 +937,34 @@ class SymbolPickerPage:
             ]
             if not cached_entries.empty:
                 print(f"Found ARASAAC results for '{query}' in local cache.")
-                return [
-                    {
-                        "name": row.get("keywords", [{}])[0].get("keyword", "N/A"),
-                        "path": os.path.join(ARASAAC_CACHE_DIR, row["local_filename"]),
-                    }
-                    for _, row in cached_entries.iterrows()
-                ]
+                # --- START: MODIFIED CODE BLOCK ---
+                results = []
+                for _, row in cached_entries.iterrows():
+                    try:
+                        # The 'keywords' column is likely a string from the CSV cache
+                        keywords_val = row.get("keywords")
+                        if isinstance(keywords_val, str):
+                            # Safely evaluate the string to a Python list
+                            keywords_list = ast.literal_eval(keywords_val)
+                        else:
+                            # It's already in the correct format (e.g., list or None)
+                            keywords_list = keywords_val if keywords_val else []
+
+                        # Ensure keywords_list is a list and not empty before indexing
+                        if isinstance(keywords_list, list) and keywords_list:
+                            keyword = keywords_list[0].get("keyword", "N/A")
+                        else:
+                            keyword = "N/A"
+
+                        results.append({
+                            "name": keyword,
+                            "path": os.path.join(ARASAAC_CACHE_DIR, row["local_filename"]),
+                        })
+                    except (ValueError, SyntaxError, KeyError) as e:
+                        print(f"Warning: Could not parse cached ARASAAC entry for '{query}'. Error: {e}")
+                        continue # Skip this problematic row
+                return results
+                # --- END: MODIFIED CODE BLOCK ---
 
         # Step 2: If not in cache, call API
         print(f"Fetching ARASAAC results for '{query}' from API...")
@@ -957,7 +979,7 @@ class SymbolPickerPage:
         # Step 3: Process results, save to cache, and return
         new_symbols_for_ui = []
         new_metadata_rows = []
-        for item in api_data:
+        for item in api_data[:4]:
             pictogram_id = item.get("_id")
             if not pictogram_id:
                 continue
@@ -1006,7 +1028,7 @@ class SymbolPickerPage:
             )
 
         return new_symbols_for_ui
-
+    
     def search_flaticon(self, query):
         if FLATICON_API_KEY == "YOUR_FLATICON_API_KEY" or not FLATICON_API_KEY:
             print("Flaticon API key not set. Skipping search.")
