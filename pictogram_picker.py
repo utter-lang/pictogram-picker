@@ -1,7 +1,7 @@
-                import customtkinter as ctk
+import customtkinter as ctk
 from tkinter import messagebox, filedialog
 import pandas as pd
-import requests
+import requests     
 from PIL import Image
 from io import BytesIO
 from fuzzywuzzy import fuzz
@@ -33,6 +33,7 @@ FLATICON_API_URLS = {
     "download": "https://api.freepik.com/v1/icons/{id}/download",
 }
 SELECTED_SYMBOLS_DIR = "selected_symbols"
+ARASAAC_CACHE_DIR = "arasaac_symbols"  # Directory for local ARASAAC symbols
 MAX_GRID_COLUMNS = 4
 
 
@@ -98,24 +99,18 @@ class SymbolPickerApp:
                 "Autosaved", f"Progress automatically saved to\n{filename}"
             )
         else:
-            # Ask the user if they want to save their work
             user_choice = messagebox.askyesnocancel(
                 "Unsaved Changes",
                 "You have unsaved changes. Would you like to save before returning to the home screen?",
             )
-            filename = os.path.basename(self.symbol_picker_page.output_filename)
 
-            if user_choice is True:  # User clicked "Yes"
+            if user_choice is True:
                 if self.symbol_picker_page.save_to_current_file():
-
+                    filename = os.path.basename(self.symbol_picker_page.output_filename)
+                    messagebox.showinfo("Saved", f"Progress saved to\n{filename}")
                     self.show_start_page()
-                    messagebox.showinfo(
-                        "Saved", f"Progress saved to\n{filename}"
-                    )
-                # If save fails, an error is shown and we stay on the page
-            elif user_choice is False:  # User clicked "No"
+            elif user_choice is False:
                 self.show_start_page()
-            # If user_choice is None (Cancel), do nothing
 
     def toggle_theme(self):
         current_mode = ctk.get_appearance_mode()
@@ -125,7 +120,7 @@ class SymbolPickerApp:
     def update_theme_button_text(self):
         current_mode = ctk.get_appearance_mode()
         next_mode = "Dark" if current_mode == "Light" else "Light"
-        self.theme_button.configure(text=f"{next_mode} Theme")
+        self.theme_button.configure(text=f"Switch to {next_mode}")
 
     def show_start_page(self):
         if self.symbol_picker_page:
@@ -240,7 +235,15 @@ class SymbolPickerPage:
         self.master = master
         self.root = controller.root
         self.controller = controller
-        self.autosave_var = ctk.BooleanVar(value=True)  # Variable for checkbox state
+        self.autosave_var = ctk.BooleanVar(value=True)
+
+        # --- ARASAAC Caching Setup ---
+        self.arasaac_metadata_path = os.path.join(ARASAAC_CACHE_DIR, "metadata.csv")
+        os.makedirs(ARASAAC_CACHE_DIR, exist_ok=True)
+        try:
+            self.arasaac_metadata_df = pd.read_csv(self.arasaac_metadata_path)
+        except FileNotFoundError:
+            self.arasaac_metadata_df = pd.DataFrame()
 
         base_size_map = {
             "Extra Small": 64,
@@ -271,14 +274,14 @@ class SymbolPickerPage:
         self.output_filename = output_filename
         self.output_df = dataframe
         self.current_index = start_index
-        self.symbol_buttons = []
-        self.selected_index = -1
-        self.grid_row, self.grid_col = 0, 0
+        self.symbol_buttons, self.cached_results = [], {}
+        self.selected_index, self.grid_row, self.grid_col, self.current_search_id = (
+            -1,
+            0,
+            0,
+            0,
+        )
         self.results_queue = Queue()
-        self.current_search_id = 0
-        self.cached_results = {}
-        if not os.path.exists(SELECTED_SYMBOLS_DIR):
-            os.makedirs(SELECTED_SYMBOLS_DIR)
         self.root.after(100, self.search_for_symbols)
 
     def disable_root_key_bindings(self, event):
@@ -288,6 +291,7 @@ class SymbolPickerPage:
         self.root.bind("<KeyPress>", self.on_key_press)
 
     def setup_gui(self):
+        # This setup is now only run once
         self.main_frame = ctk.CTkFrame(self.master, fg_color="transparent")
         self.main_frame.grid(
             row=0,
@@ -302,15 +306,14 @@ class SymbolPickerPage:
         button_ipadding = int(BUTTON_IPAD * UI_SCALE / 2)
 
         # --- Fonts and Frames setup (condensed for brevity) ---
-        self.italic_font = ctk.CTkFont(
-            family="Arial", size=int(FONT_SIZE_NORMAL * UI_SCALE), slant="italic"
-        )
-        self.normal_font = ctk.CTkFont(
-            family="Arial", size=int(FONT_SIZE_NORMAL * UI_SCALE)
-        )
-        self.header_font = ctk.CTkFont(
-            family="Arial", size=int(FONT_SIZE_LARGE * UI_SCALE), weight="bold"
-        )
+        self.italic_font, self.normal_font, self.header_font = [
+            ctk.CTkFont(family="Arial", size=int(s * UI_SCALE), **k)
+            for s, k in [
+                (FONT_SIZE_NORMAL, {"slant": "italic"}),
+                (FONT_SIZE_NORMAL, {}),
+                (FONT_SIZE_LARGE, {"weight": "bold"}),
+            ]
+        ]
         top_frame = ctk.CTkFrame(self.main_frame)
         top_frame.grid(
             row=0, column=0, sticky="ew", pady=(0, int(PADDING_NORMAL * UI_SCALE))
@@ -347,9 +350,7 @@ class SymbolPickerPage:
         self.custom_search_entry.pack(
             side="left", padx=(0, int(PADDING_LARGE * UI_SCALE))
         )
-        self.custom_search_entry.bind(
-            "<Return>", lambda event: self.refresh_symbol_grid()
-        )
+        self.custom_search_entry.bind("<Return>", lambda e: self.refresh_symbol_grid())
         self.custom_search_entry.bind("<FocusIn>", self.disable_root_key_bindings)
         self.custom_search_entry.bind("<FocusOut>", self.enable_root_key_bindings)
         ctk.CTkLabel(controls_frame, text="Icon Size:", font=self.normal_font).pack(
@@ -451,14 +452,11 @@ class SymbolPickerPage:
         self.next_button.grid(
             row=0, column=2, padx=int(PADDING_SMALL * UI_SCALE), ipady=button_ipadding
         )
-
-        # --- Bottom Frame for Save Button and Autosave Checkbox ---
         bottom_frame = ctk.CTkFrame(self.main_frame)
         bottom_frame.grid(
             row=4, column=0, sticky="ew", pady=int(PADDING_NORMAL * UI_SCALE)
         )
         bottom_frame.grid_columnconfigure(1, weight=1)
-
         self.autosave_checkbox = ctk.CTkCheckBox(
             bottom_frame,
             text="Autosave",
@@ -466,7 +464,6 @@ class SymbolPickerPage:
             font=self.normal_font,
         )
         self.autosave_checkbox.grid(row=0, column=0, padx=10)
-
         self.save_button = ctk.CTkButton(
             bottom_frame,
             text="Save As...",
@@ -475,7 +472,6 @@ class SymbolPickerPage:
             font=self.normal_font,
         )
         self.save_button.grid(row=0, column=2, padx=10, ipady=button_ipadding)
-
         self.enable_root_key_bindings(None)
 
     def get_current_icon_size(self):
@@ -493,9 +489,8 @@ class SymbolPickerPage:
     def redraw_grid_from_cache(self):
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
-        self.grid_row, self.grid_col = 0, 0
+        self.grid_row, self.grid_col, self.selected_index = 0, 0, -1
         self.symbol_buttons = []
-        self.selected_index = -1
         for source in ["Mulberry", "OpenMoji", "ARASAAC", "Flaticon"]:
             if source in self.cached_results:
                 self.display_header(source)
@@ -515,21 +510,19 @@ class SymbolPickerPage:
         self.scrollable_frame.grid_remove()
         self.existing_symbol_frame.grid(row=2, column=0, sticky="nsew")
         try:
-            filename = self.output_df.loc[self.current_index, "symbol_filename"]
-            symbol_name = self.output_df.loc[self.current_index, "symbol_name"]
-            source = self.output_df.loc[self.current_index, "symbol_source"]
+            filename, symbol_name, source = self.output_df.loc[
+                self.current_index, ["symbol_filename", "symbol_name", "symbol_source"]
+            ]
             filepath = os.path.join(SELECTED_SYMBOLS_DIR, filename)
-            image_data = None
-            if filepath.endswith(".svg"):
-                image_data = cairosvg.svg2png(
-                    url=filepath, output_width=256, output_height=256
-                )
-            else:
-                with open(filepath, "rb") as f:
-                    image_data = f.read()
+            image_data = (
+                cairosvg.svg2png(url=filepath, output_width=256, output_height=256)
+                if filepath.endswith(".svg")
+                else open(filepath, "rb").read()
+            )
             image = Image.open(BytesIO(image_data))
-            img_size = int(256 * UI_SCALE)
-            ctk_image = ctk.CTkImage(light_image=image, size=(img_size, img_size))
+            ctk_image = ctk.CTkImage(
+                light_image=image, size=(int(256 * UI_SCALE), int(256 * UI_SCALE))
+            )
             self.existing_symbol_label.configure(image=ctk_image, text="")
             self.existing_symbol_info.configure(
                 text=f"Symbol: {symbol_name}\nSource: {source}"
@@ -547,27 +540,27 @@ class SymbolPickerPage:
         self.cached_results = {}
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
-        custom_query = self.custom_search_entry.get().strip()
-        query = custom_query if custom_query else self.current_word
+        query = self.custom_search_entry.get().strip() or self.current_word
         if query == "(No Word)":
             return
-        self.grid_row, self.grid_col = 0, 0
+        self.grid_row, self.grid_col, self.selected_index = 0, 0, -1
         self.symbol_buttons = []
-        self.selected_index = -1
         self.flaticon_button.configure(state="normal")
+
+        # All searches are now processed synchronously and check caches where applicable
         self.process_local_search_batch(self.search_mulberry(query), "Mulberry")
         self.process_local_search_batch(self.search_openmoji(query), "OpenMoji")
-        self.display_header("ARASAAC")
-        self.start_threaded_searches(query)
+        self.process_local_search_batch(
+            self.search_arasaac(query, self.current_index), "ARASAAC"
+        )
+
+        # Flaticon remains threaded due to multiple network calls
+        self.display_header("Flaticon")
+        self.start_threaded_searches(query, sources=["Flaticon"])
         self.process_queue()
 
-    def start_threaded_searches(self, query, sources=["ARASAAC"]):
-        api_searches = []
-        if "ARASAAC" in sources:
-            api_searches.append((self.search_arasaac, query, "ARASAAC"))
-        if "Flaticon" in sources:
-            api_searches.append((self.search_flaticon, query, "Flaticon"))
-        for search_func, q, source_name in api_searches:
+    def start_threaded_searches(self, query, sources=["Flaticon"]):
+        for search_func, q, source_name in [(self.search_flaticon, query, "Flaticon")]:
             thread = threading.Thread(
                 target=self.run_search_in_thread,
                 args=(search_func, q, source_name, self.current_search_id),
@@ -683,18 +676,18 @@ class SymbolPickerPage:
         for symbol in symbols:
             try:
                 if "path" in symbol:
-                    if symbol["path"].endswith(".svg"):
-                        self.cached_results[source].append(
-                            (symbol, symbol["path"], "svg_path")
-                        )
-                        self.display_symbol(source, symbol, symbol["path"], "svg_path")
-                    else:
-                        with open(symbol["path"], "rb") as f:
+                    data = symbol["path"]
+                    data_type = "svg_path" if data.endswith(".svg") else "png_data"
+                    if data_type == "png_data":
+                        with open(data, "rb") as f:
                             image_data = f.read()
                         self.cached_results[source].append(
                             (symbol, image_data, "png_data")
                         )
                         self.display_symbol(source, symbol, image_data, "png_data")
+                    else:  # svg
+                        self.cached_results[source].append((symbol, data, "svg_path"))
+                        self.display_symbol(source, symbol, data, "svg_path")
             except Exception as e:
                 print(f"Error processing local symbol '{symbol.get('name')}': {e}")
 
@@ -719,9 +712,9 @@ class SymbolPickerPage:
                 .replace(";", ",")
             )
             parts = processed_text.split(",")
-            self.current_word_list = [word.strip() for word in parts if word.strip()]
-            if not self.current_word_list:
-                self.current_word_list = ["(Empty)"]
+            self.current_word_list = [
+                word.strip() for word in parts if word.strip()
+            ] or ["(Empty)"]
         self.current_word = self.current_word_list[0]
         self.base_word_for_filename = self.current_word_list[0]
         word_button_ipadding = int(BUTTON_IPAD * UI_SCALE / 4)
@@ -805,10 +798,10 @@ class SymbolPickerPage:
                 button.configure(border_width=0)
 
     def select_symbol(self, symbol, source):
-        sanitized_word = "".join(x for x in self.base_word_for_filename if x.isalnum())
-        if not sanitized_word:
-            sanitized_word = f"entry{self.current_index}"
-        filename = ""
+        sanitized_word = (
+            "".join(x for x in self.base_word_for_filename if x.isalnum())
+            or f"entry{self.current_index}"
+        )
         try:
             if "path" in symbol:
                 original_filename = os.path.basename(symbol["path"])
@@ -838,9 +831,9 @@ class SymbolPickerPage:
                     filename = f"{sanitized_word}_{source}_{base_name}"
                 with open(os.path.join(SELECTED_SYMBOLS_DIR, filename), "wb") as f:
                     shutil.copyfileobj(response.raw, f)
-            self.output_df.loc[self.current_index, "symbol_filename"] = filename
-            self.output_df.loc[self.current_index, "symbol_name"] = symbol["name"]
-            self.output_df.loc[self.current_index, "symbol_source"] = source
+            self.output_df.loc[
+                self.current_index, ["symbol_filename", "symbol_name", "symbol_source"]
+            ] = [filename, symbol["name"], source]
             self.auto_save()
             self.next_word()
         except Exception as e:
@@ -866,7 +859,6 @@ class SymbolPickerPage:
         self.save_to_current_file()
 
     def save_to_current_file(self):
-        """Saves the current DataFrame to its output_filename."""
         try:
             self.output_df.to_csv(self.output_filename, index=False)
             print(f"Saved progress to {self.output_filename}")
@@ -885,11 +877,10 @@ class SymbolPickerPage:
             try:
                 self.output_df.to_csv(new_filename, index=False)
                 messagebox.showinfo("Saved", f"Progress saved to {new_filename}")
-                self.output_filename = new_filename  # Update the current filename
+                self.output_filename = new_filename
             except Exception as e:
                 messagebox.showerror("Error", f"Could not save file: {e}")
 
-    # --- Symbol Search Functions ---
     def search_mulberry(self, query):
         try:
             df = self.mulberry_df.copy()
@@ -936,20 +927,85 @@ class SymbolPickerPage:
             print(f"Error searching OpenMoji: {e}")
             return []
 
-    def search_arasaac(self, query):
+    def search_arasaac(self, query, current_index):
+        # Step 1: Check cache first
+        if not self.arasaac_metadata_df.empty:
+            cached_entries = self.arasaac_metadata_df[
+                (self.arasaac_metadata_df["search_term"] == query)
+                & (self.arasaac_metadata_df["search_index"] == current_index)
+            ]
+            if not cached_entries.empty:
+                print(f"Found ARASAAC results for '{query}' in local cache.")
+                return [
+                    {
+                        "name": row.get("keywords", [{}])[0].get("keyword", "N/A"),
+                        "path": os.path.join(ARASAAC_CACHE_DIR, row["local_filename"]),
+                    }
+                    for _, row in cached_entries.iterrows()
+                ]
+
+        # Step 2: If not in cache, call API
+        print(f"Fetching ARASAAC results for '{query}' from API...")
         try:
             response = requests.get(f"{ARASAAC_API_URL}{query}", timeout=10)
             response.raise_for_status()
-            return [
-                {
-                    "name": item.get("keywords", [{}])[0].get("keyword", "N/A"),
-                    "url": f"https://api.arasaac.org/api/pictograms/{item['_id']}",
-                }
-                for item in response.json()[:4]
-            ]
+            api_data = response.json()
         except Exception as e:
             print(f"Error searching ARASAAC: {e}")
             return []
+
+        # Step 3: Process results, save to cache, and return
+        new_symbols_for_ui = []
+        new_metadata_rows = []
+        for item in api_data:
+            pictogram_id = item.get("_id")
+            if not pictogram_id:
+                continue
+
+            try:
+                img_url = f"https://api.arasaac.org/api/pictograms/{pictogram_id}"
+                img_response = requests.get(img_url, timeout=10)
+                img_response.raise_for_status()
+
+                local_filename = f"{pictogram_id}.png"
+                local_filepath = os.path.join(ARASAAC_CACHE_DIR, local_filename)
+                with open(local_filepath, "wb") as f:
+                    f.write(img_response.content)
+
+                # Prepare metadata row for saving
+                metadata_row = item.copy()
+                metadata_row["search_term"] = query
+                metadata_row["search_index"] = current_index
+                metadata_row["local_filename"] = local_filename
+                new_metadata_rows.append(metadata_row)
+
+                # Prepare data to be returned for immediate display
+                new_symbols_for_ui.append(
+                    {
+                        "name": item.get("keywords", [{}])[0].get("keyword", "N/A"),
+                        "path": local_filepath,
+                    }
+                )
+            except Exception as e:
+                print(
+                    f"Failed to download or save ARASAAC pictogram {pictogram_id}: {e}"
+                )
+
+        # Step 4: Update the metadata DataFrame and save to CSV
+        if new_metadata_rows:
+            new_df = pd.DataFrame(new_metadata_rows)
+            self.arasaac_metadata_df = pd.concat(
+                [self.arasaac_metadata_df, new_df], ignore_index=True
+            )
+            # Append to file to ensure persistence
+            new_df.to_csv(
+                self.arasaac_metadata_path,
+                mode="a",
+                header=not os.path.exists(self.arasaac_metadata_path),
+                index=False,
+            )
+
+        return new_symbols_for_ui
 
     def search_flaticon(self, query):
         if FLATICON_API_KEY == "YOUR_FLATICON_API_KEY" or not FLATICON_API_KEY:
@@ -974,19 +1030,15 @@ class SymbolPickerPage:
         results = []
         for item in search_data.get("data", []):
             try:
-                icon_id = item.get("id")
-                icon_name = item.get("name", "N/A")
+                icon_id, icon_name = item.get("id"), item.get("name", "N/A")
                 if not icon_id:
                     continue
-                download_url_template = FLATICON_API_URLS["download"]
-                download_url = download_url_template.format(id=icon_id)
-                download_params = {"format": "png"}
+                download_url = FLATICON_API_URLS["download"].format(id=icon_id)
                 download_response = requests.get(
-                    download_url, headers=headers, params=download_params, timeout=10
+                    download_url, headers=headers, params={"format": "png"}, timeout=10
                 )
                 download_response.raise_for_status()
-                download_data = download_response.json()
-                final_url = download_data.get("data", {}).get("url")
+                final_url = download_response.json().get("data", {}).get("url")
                 if final_url:
                     results.append({"name": icon_name, "url": final_url})
             except Exception as e:

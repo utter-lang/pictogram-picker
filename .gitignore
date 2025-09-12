@@ -205,3 +205,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# symbol folders
+arasaac_symbols/
+ocha-humanitarian-icons/
+picom-symbols/
+sclera-symbols/
+selected-symbols/
+tawasol/
