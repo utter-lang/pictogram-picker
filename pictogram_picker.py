@@ -1051,8 +1051,9 @@ class SymbolPickerPage:
                 index=False,
             )
 
+
     def search_flaticon(self, query):
-        # This function is now a generator
+        # This function is a generator that yields results one by one
         if FLATICON_API_KEY == "YOUR_FLATICON_API_KEY" or not FLATICON_API_KEY:
             print("Flaticon API key not set. Skipping search.")
             return
@@ -1073,7 +1074,9 @@ class SymbolPickerPage:
                 print(f"Search Response Text: {search_response.text}")
             return
 
-        for item in search_data.get("data", []):
+        # --- MODIFIED LINE: Added [:4] to enforce the limit ---
+        # This ensures we only process the first 4 items, even if the API returned more.
+        for item in search_data.get("data", [])[:4]:
             try:
                 icon_id, icon_name = item.get("id"), item.get("name", "N/A")
                 if not icon_id:
@@ -1087,9 +1090,7 @@ class SymbolPickerPage:
                 if final_url:
                     yield {"name": icon_name, "url": final_url}
             except Exception as e:
-                print(
-                    f"  -> ERROR getting download link for icon ID {item.get('id')}: {e}"
-                )
+                print(f"  -> ERROR getting download link for icon ID {item.get('id')}: {e}")
                 continue
 
 
