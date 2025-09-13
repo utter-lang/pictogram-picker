@@ -634,10 +634,7 @@ class SymbolPickerPage:
                         final_height = display_size_max
                         final_width = int(display_size_max * aspect_ratio)
 
-                    resized_image = image.resize(
-                        (max(1, final_width), max(1, final_height)),
-                        Image.Resampling.LANCZOS,
-                    )
+                    resized_image = image.resize((max(1, final_width), max(1, final_height)), Image.LANCZOS,)
 
                     padded_image = Image.new(
                         "RGBA", (display_size_max, display_size_max), (0, 0, 0, 0)
@@ -815,10 +812,7 @@ class SymbolPickerPage:
                     final_height = current_size
                     final_width = int(current_size * aspect_ratio)
 
-                resized_image = image.resize(
-                    (max(1, final_width), max(1, final_height)),
-                    Image.Resampling.LANCZOS,
-                )
+                resized_image = image.resize((max(1, final_width), max(1, final_height)), Image.LANCZOS,)
 
                 padded_image = Image.new(
                     "RGBA", (current_size, current_size), (0, 0, 0, 0)
