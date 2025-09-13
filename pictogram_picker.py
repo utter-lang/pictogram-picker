@@ -351,12 +351,9 @@ class SymbolPickerPage:
         self.output_df = dataframe
         self.current_index = start_index
         self.symbol_buttons, self.cached_results = [], {}
-        self.selected_index, self.grid_row, self.grid_col, self.current_search_id = (
-            -1,
-            0,
-            0,
-            0,
-        )
+        self.selected_index, self.current_search_id = -1, 0
+        self.source_frames = {}
+        self.source_counters = {}
         self.results_queue = Queue()
         self.root.after(100, self.search_for_symbols)
 
@@ -561,7 +558,9 @@ class SymbolPickerPage:
     def redraw_grid_from_cache(self):
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
-        self.grid_row, self.grid_col, self.selected_index = 0, 0, -1
+        self.source_frames = {}
+        self.source_counters = {}
+        self.selected_index = -1
         self.symbol_buttons = []
         for source in [
             "Mulberry",
@@ -573,7 +572,6 @@ class SymbolPickerPage:
             "Flaticon",
         ]:
             if source in self.cached_results:
-                self.display_header(source)
                 for symbol, data, data_type in self.cached_results[source]:
                     self.display_symbol(source, symbol, data, data_type)
 
@@ -662,7 +660,9 @@ class SymbolPickerPage:
         query = self.custom_search_entry.get().strip() or self.current_word
         if query == "(No Word)":
             return
-        self.grid_row, self.grid_col, self.selected_index = 0, 0, -1
+        self.selected_index = -1
+        self.source_frames = {}
+        self.source_counters = {}
         self.symbol_buttons = []
         self.flaticon_button.configure(state="normal")
         self.process_local_search_batch(self.search_mulberry(query), "Mulberry")
@@ -676,7 +676,8 @@ class SymbolPickerPage:
         if not arasaac_cache_results:
             sources_to_search.append("ARASAAC")
         if "ARASAAC" in sources_to_search:
-            self.display_header("ARASAAC")
+            # This call ensures the header is created even if no results are found initially
+            self._get_or_create_source_frame("ARASAAC")
         self.start_threaded_searches(query, sources=sources_to_search)
         self.process_queue()
 
@@ -697,7 +698,6 @@ class SymbolPickerPage:
 
     def fetch_flaticon_symbols(self):
         self.flaticon_button.configure(state="disabled")
-        self.display_header("Flaticon")
         query = self.custom_search_entry.get().strip() or self.current_word
         self.start_threaded_searches(query, sources=["Flaticon"])
 
@@ -747,24 +747,31 @@ class SymbolPickerPage:
         finally:
             self.root.after(50, self.process_queue)
 
-    def display_header(self, source):
-        if self.grid_col != 0:
-            self.grid_row += 1
-        source_label = ctk.CTkLabel(
-            self.scrollable_frame, text=f"--- {source} ---", font=self.header_font
-        )
-        source_label.grid(
-            row=self.grid_row,
-            column=0,
-            columnspan=MAX_GRID_COLUMNS,
-            pady=int(PADDING_NORMAL * UI_SCALE),
-            sticky="w",
-        )
-        self.grid_row += 1
-        self.grid_col = 0
+    def _get_or_create_source_frame(self, source):
+        """Gets the grid frame for a source, creating it and its header if it doesn't exist."""
+        if source not in self.source_frames:
+            # Create a container for the header and the grid
+            container = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent")
+            container.pack(side="top", fill="x", pady=(10, 0))
+
+            # Add the header label to the container
+            header = ctk.CTkLabel(
+                container, text=f"--- {source} ---", font=self.header_font
+            )
+            header.pack(side="top", anchor="w", padx=5)
+
+            # Add the grid frame to the container
+            grid_frame = ctk.CTkFrame(container, fg_color="transparent")
+            grid_frame.pack(side="top", fill="x")
+
+            self.source_frames[source] = grid_frame
+            self.source_counters[source] = {"row": 0, "col": 0}
+
+        return self.source_frames[source], self.source_counters[source]
 
     def display_symbol(self, source, symbol, data, data_type):
         try:
+            parent_frame, counters = self._get_or_create_source_frame(source)
             current_size = self.get_current_icon_size()
             image_data = None
             if data_type == "svg_path":
@@ -811,7 +818,7 @@ class SymbolPickerPage:
                 light_image=final_image_for_display, size=(current_size, current_size)
             )
             btn = ctk.CTkButton(
-                self.scrollable_frame,
+                parent_frame,
                 image=ctk_image,
                 text=symbol["name"][:30],
                 compound="top",
@@ -822,15 +829,17 @@ class SymbolPickerPage:
                 font=self.normal_font,
             )
             btn.grid(
-                row=self.grid_row,
-                column=self.grid_col,
+                row=counters["row"],
+                column=counters["col"],
                 padx=self.get_current_padding(),
                 pady=self.get_current_padding(),
             )
             self.symbol_buttons.append(btn)
-            self.grid_col = (self.grid_col + 1) % MAX_GRID_COLUMNS
-            if self.grid_col == 0:
-                self.grid_row += 1
+
+            counters["col"] = (counters["col"] + 1) % MAX_GRID_COLUMNS
+            if counters["col"] == 0:
+                counters["row"] += 1
+
             if self.selected_index == -1 and self.symbol_buttons:
                 self.selected_index = 0
                 self.update_selection_highlight()
@@ -840,7 +849,6 @@ class SymbolPickerPage:
     def process_local_search_batch(self, symbols, source):
         if not symbols:
             return
-        self.display_header(source)
         self.cached_results[source] = []
         for symbol in symbols:
             try:
