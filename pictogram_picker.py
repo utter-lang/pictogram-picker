@@ -108,7 +108,9 @@ class SymbolPickerApp:
 
             if user_choice is True:
                 if self.symbol_picker_page.save_to_current_file():
-                    filename = os.path.basename(self.symbol_picker_page.output_filename)
+                    filename = os.path.basename(
+                        self.symbol_picker_page.output_filename
+                    )
                     messagebox.showinfo("Saved", f"Progress saved to\n{filename}")
                     self.show_start_page()
             elif user_choice is False:
@@ -226,7 +228,9 @@ class StartPage:
             total_entries = len(loaded_df)
             message = f"Loaded {total_entries} entries. {completed_count} items have symbols.\n\nStarting at entry {start_index + 1}."
             if completed_count > 0 and start_index == len(loaded_df):
-                message = f"Deck is complete with {completed_count} symbols! Loading last entry."
+                message = (
+                    f"Deck is complete with {completed_count} symbols! Loading last entry."
+                )
                 start_index = len(loaded_df) - 1
             messagebox.showinfo("Deck Loaded", message)
             self.controller.launch_symbol_picker(filename, loaded_df, start_index)
@@ -243,6 +247,11 @@ class SymbolPickerPage:
         self.root = controller.root
         self.controller = controller
         self.autosave_var = ctk.BooleanVar(value=True)
+
+        self.source_column_map = {
+            "Mulberry": 0, "OpenMoji": 0, "Picom": 0, "Flaticon": 0,
+            "Sclera": 1, "Bliss": 1, "ARASAAC": 1
+        }
 
         # --- ARASAAC Caching Setup ---
         self.arasaac_metadata_path = os.path.join(ARASAAC_CACHE_DIR, "metadata.csv")
@@ -354,7 +363,12 @@ class SymbolPickerPage:
         self.selected_index, self.current_search_id = -1, 0
         self.source_frames = {}
         self.source_counters = {}
+        self.column_row_counters = {0: 0, 1: 0}
         self.results_queue = Queue()
+        # Navigation grid attributes
+        self.nav_grid_dirty = True
+        self.nav_grid = []
+        self.button_to_coords = {}
         self.root.after(100, self.search_for_symbols)
 
     def disable_root_key_bindings(self, event):
@@ -473,6 +487,8 @@ class SymbolPickerPage:
             self.main_frame, label_text="Symbols", label_font=self.normal_font
         )
         self.scrollable_frame.grid(row=2, column=0, sticky="nsew")
+        self.scrollable_frame.grid_columnconfigure((0, 1), weight=1, uniform="group1")
+
         self.existing_symbol_frame = ctk.CTkFrame(self.main_frame)
         self.existing_symbol_frame.grid_columnconfigure(0, weight=1)
         self.existing_symbol_label = ctk.CTkLabel(self.existing_symbol_frame, text="")
@@ -560,8 +576,10 @@ class SymbolPickerPage:
             widget.destroy()
         self.source_frames = {}
         self.source_counters = {}
+        self.column_row_counters = {0: 0, 1: 0}
         self.selected_index = -1
         self.symbol_buttons = []
+        self.nav_grid_dirty = True
         for source in [
             "Mulberry",
             "OpenMoji",
@@ -657,6 +675,7 @@ class SymbolPickerPage:
         self.cached_results = {}
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
+        self.column_row_counters = {0: 0, 1: 0}
         query = self.custom_search_entry.get().strip() or self.current_word
         if query == "(No Word)":
             return
@@ -664,6 +683,7 @@ class SymbolPickerPage:
         self.source_frames = {}
         self.source_counters = {}
         self.symbol_buttons = []
+        self.nav_grid_dirty = True
         self.flaticon_button.configure(state="normal")
         self.process_local_search_batch(self.search_mulberry(query), "Mulberry")
         self.process_local_search_batch(self.search_openmoji(query), "OpenMoji")
@@ -676,7 +696,6 @@ class SymbolPickerPage:
         if not arasaac_cache_results:
             sources_to_search.append("ARASAAC")
         if "ARASAAC" in sources_to_search:
-            # This call ensures the header is created even if no results are found initially
             self._get_or_create_source_frame("ARASAAC")
         self.start_threaded_searches(query, sources=sources_to_search)
         self.process_queue()
@@ -699,6 +718,7 @@ class SymbolPickerPage:
     def fetch_flaticon_symbols(self):
         self.flaticon_button.configure(state="disabled")
         query = self.custom_search_entry.get().strip() or self.current_word
+        self._get_or_create_source_frame("Flaticon")
         self.start_threaded_searches(query, sources=["Flaticon"])
 
     def run_search_in_thread(self, search_func, query, source, search_id):
@@ -748,19 +768,19 @@ class SymbolPickerPage:
             self.root.after(50, self.process_queue)
 
     def _get_or_create_source_frame(self, source):
-        """Gets the grid frame for a source, creating it and its header if it doesn't exist."""
         if source not in self.source_frames:
-            # Create a container for the header and the grid
-            container = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent")
-            container.pack(side="top", fill="x", pady=(10, 0))
+            column_index = self.source_column_map.get(source, 0)
+            row_index = self.column_row_counters[column_index]
 
-            # Add the header label to the container
+            container = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent")
+            container.grid(row=row_index, column=column_index, sticky="new", pady=(10,0), padx=5)
+            self.column_row_counters[column_index] += 1
+
             header = ctk.CTkLabel(
                 container, text=f"--- {source} ---", font=self.header_font
             )
             header.pack(side="top", anchor="w", padx=5)
 
-            # Add the grid frame to the container
             grid_frame = ctk.CTkFrame(container, fg_color="transparent")
             grid_frame.pack(side="top", fill="x")
 
@@ -771,6 +791,7 @@ class SymbolPickerPage:
 
     def display_symbol(self, source, symbol, data, data_type):
         try:
+            self.nav_grid_dirty = True
             parent_frame, counters = self._get_or_create_source_frame(source)
             current_size = self.get_current_icon_size()
             image_data = None
@@ -783,15 +804,14 @@ class SymbolPickerPage:
 
             image = Image.open(BytesIO(image_data))
 
-            # --- UNIFIED DISPLAY LOGIC ---
             original_width, original_height = image.size
             if original_height > 0:
                 aspect_ratio = original_width / original_height
 
-                if aspect_ratio >= 1:  # Wider or square
+                if aspect_ratio >= 1:
                     final_width = current_size
                     final_height = int(current_size / aspect_ratio)
-                else:  # Taller
+                else:
                     final_height = current_size
                     final_width = int(current_size * aspect_ratio)
 
@@ -939,24 +959,103 @@ class SymbolPickerPage:
             self.index_entry.delete(0, "end")
             self.index_entry.insert(0, str(self.current_index + 1))
 
+    def _build_nav_grid(self):
+        """Builds a 2D list of buttons based on their visual layout for navigation."""
+        if not self.symbol_buttons:
+            self.nav_grid = []
+            self.button_to_coords = {}
+            return
+
+        self.root.update_idletasks()
+        
+        buttons_by_row_y = {}
+        for btn in self.symbol_buttons:
+            # Absolute Y coordinate relative to the scrollable frame's inner canvas
+            abs_y = btn.winfo_y() + btn.master.master.winfo_y()
+            
+            found_row = False
+            for y_key in buttons_by_row_y:
+                if abs(abs_y - y_key) < 20:  # Tolerance to group buttons on same visual row
+                    buttons_by_row_y[y_key].append(btn)
+                    found_row = True
+                    break
+            if not found_row:
+                buttons_by_row_y[abs_y] = [btn]
+
+        sorted_y_keys = sorted(buttons_by_row_y.keys())
+        
+        self.nav_grid = []
+        for y in sorted_y_keys:
+            # Sort buttons in each row by their absolute X coordinate
+            row_buttons = sorted(buttons_by_row_y[y], key=lambda b: b.winfo_x() + b.master.master.winfo_x())
+            self.nav_grid.append(row_buttons)
+
+        self.button_to_coords = {}
+        for r, row_list in enumerate(self.nav_grid):
+            for c, btn in enumerate(row_list):
+                self.button_to_coords[btn] = (r, c)
+        
+        self.nav_grid_dirty = False
+
     def on_key_press(self, event):
         if not self.symbol_buttons or self.selected_index == -1:
             return
-        key, new_index = event.keysym, self.selected_index
-        if key == "Right":
-            new_index += 1
-        elif key == "Left":
-            new_index -= 1
-        elif key == "Down":
-            new_index += MAX_GRID_COLUMNS
-        elif key == "Up":
-            new_index -= MAX_GRID_COLUMNS
-        elif key == "Return":
+
+        key = event.keysym
+        if key == "Return":
             self.symbol_buttons[self.selected_index].invoke()
             return
-        if 0 <= new_index < len(self.symbol_buttons):
+
+        if self.nav_grid_dirty:
+            self._build_nav_grid()
+
+        if not self.nav_grid:
+            return
+
+        current_btn = self.symbol_buttons[self.selected_index]
+        if current_btn not in self.button_to_coords:
+            self._build_nav_grid()
+            if current_btn not in self.button_to_coords:
+                return 
+
+        r, c = self.button_to_coords[current_btn]
+        new_r, new_c = r, c
+
+        if key == "Right":
+            new_c += 1
+            if new_c >= len(self.nav_grid[r]):
+                new_c = 0
+                new_r += 1
+                if new_r >= len(self.nav_grid):
+                    new_r = 0 
+        elif key == "Left":
+            new_c -= 1
+            if new_c < 0:
+                new_r -= 1
+                if new_r < 0:
+                    new_r = len(self.nav_grid) - 1
+                new_c = len(self.nav_grid[new_r]) - 1
+        elif key == "Down":
+            new_r += 1
+            if new_r >= len(self.nav_grid):
+                new_r = r 
+            else:
+                new_c = min(c, len(self.nav_grid[new_r]) - 1)
+        elif key == "Up":
+            new_r -= 1
+            if new_r < 0:
+                new_r = r 
+            else:
+                new_c = min(c, len(self.nav_grid[new_r]) - 1)
+
+        try:
+            new_button = self.nav_grid[new_r][new_c]
+            new_index = self.symbol_buttons.index(new_button)
             self.selected_index = new_index
             self.update_selection_highlight()
+        except IndexError:
+            # Failsafe in case grid is somehow out of sync
+            pass
 
     def update_selection_highlight(self):
         accent_color = ctk.ThemeManager.theme["CTkButton"]["fg_color"]
@@ -1316,3 +1415,4 @@ if __name__ == "__main__":
     root = ctk.CTk()
     app = SymbolPickerApp(root)
     root.mainloop()
+
