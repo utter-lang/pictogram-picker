@@ -99,16 +99,14 @@ class SymbolPickerApp:
             english_col = "english"
         elif choice == "new":
             csv_path = "en_word_diversity_ranking.csv"
-            english_col = " Word"  # Note the leading space
+            english_col = "english" 
         else:
             self.root.destroy()  # Exit if no choice is made
             return
 
         try:
             self.base_vocab_df = pd.read_csv(csv_path)
-            if choice == "new":
-                # Rename the column to 'english' for consistency throughout the app
-                self.base_vocab_df.rename(columns={english_col: "english"}, inplace=True)
+            # The user confirmed they changed their CSV manually to have the 'english' column
         except FileNotFoundError as e:
             messagebox.showerror("Error", f"Could not find required file: {e.filename}")
             self.root.destroy()
@@ -256,6 +254,7 @@ class StartPage:
             "symbol_name",
             "symbol_source",
             "original_filename",
+            "notes",
         ]:
             if col not in new_df.columns:
                 new_df[col] = pd.NA
@@ -593,9 +592,22 @@ class SymbolPickerPage:
         self.next_button.grid(
             row=0, column=2, padx=int(PADDING_SMALL * UI_SCALE), ipady=button_ipadding
         )
+        
+        # --- Notes Frame ---
+        notes_frame = ctk.CTkFrame(self.main_frame)
+        notes_frame.grid(row=4, column=0, sticky="ew", pady=int(PADDING_NORMAL * UI_SCALE))
+        notes_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(notes_frame, text="Note:", font=self.normal_font).pack(side="left", padx=(10, 5))
+        self.note_entry = ctk.CTkEntry(notes_frame, font=self.normal_font)
+        self.note_entry.pack(side="left", expand=True, fill="x", padx=5)
+        self.note_entry.bind("<FocusIn>", self.disable_root_key_bindings)
+        self.note_entry.bind("<FocusOut>", self.enable_root_key_bindings)
+        self.add_note_button = ctk.CTkButton(notes_frame, text="Add Note", command=self.add_note, font=self.normal_font)
+        self.add_note_button.pack(side="left", padx=(5, 10))
+
         bottom_frame = ctk.CTkFrame(self.main_frame)
         bottom_frame.grid(
-            row=4, column=0, sticky="ew", pady=int(PADDING_NORMAL * UI_SCALE)
+            row=5, column=0, sticky="ew", pady=int(PADDING_NORMAL * UI_SCALE)
         )
         bottom_frame.grid_columnconfigure(1, weight=1)
         self.autosave_checkbox = ctk.CTkCheckBox(
@@ -614,6 +626,25 @@ class SymbolPickerPage:
         )
         self.save_button.grid(row=0, column=2, padx=10, ipady=button_ipadding)
         self.enable_root_key_bindings(None)
+
+    def add_note(self):
+        """Adds the text from the note entry to the current row in the dataframe."""
+        note_text = self.note_entry.get()
+        if not note_text:
+            return
+
+        if "notes" not in self.output_df.columns:
+            self.output_df["notes"] = pd.NA
+        
+        # Use .loc to ensure the value is set correctly
+        self.output_df.loc[self.current_index, "notes"] = note_text
+        print(f"Note added for index {self.current_index}: {note_text}")
+        
+        # Clear the entry box after adding the note
+        self.note_entry.delete(0, "end")
+        
+        self.auto_save()
+
 
     def get_current_icon_size(self):
         return self.size_map.get(self.size_dropdown.get(), 128)
@@ -986,6 +1017,12 @@ class SymbolPickerPage:
                 )
                 if i != 0:
                     btn.configure(fg_color="gray50")
+        
+        # --- Update Note Entry ---
+        self.note_entry.delete(0, "end")
+        if "notes" in self.output_df.columns and pd.notna(self.output_df.loc[self.current_index, "notes"]):
+            existing_note = self.output_df.loc[self.current_index, "notes"]
+            self.note_entry.insert(0, str(existing_note))
 
     def switch_search_term(self, new_word):
         self.current_word = new_word
