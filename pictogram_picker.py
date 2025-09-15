@@ -14,6 +14,9 @@ from dotenv import load_dotenv
 import ast
 import time
 import platform
+import json
+import platform  # Make sure this is at the top of your file
+import json  # And this one too
 
 # --- UI Sizing Constants ---
 UI_SCALE = 1.25
@@ -36,12 +39,13 @@ FLATICON_API_URLS = {
     "download": "https://api.freepik.com/v1/icons/{id}/download",
 }
 SELECTED_SYMBOLS_DIR = "selected-symbols"
-ARASAAC_CACHE_DIR = "arasaac_symbols"  # Directory for local ARASAAC symbols
+ARASAAC_CACHE_DIR = "arasaac_symbols"
 MAX_GRID_COLUMNS = 4
 
 
 class FormatSelectionDialog(ctk.CTkToplevel):
     """A dialog to ask the user which CSV format to use."""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.title("Select Format")
@@ -58,10 +62,14 @@ class FormatSelectionDialog(ctk.CTkToplevel):
         button_frame = ctk.CTkFrame(self, fg_color="transparent")
         button_frame.pack(pady=10)
 
-        self.legacy_button = ctk.CTkButton(button_frame, text="Legacy Esperanto", command=self.on_legacy)
+        self.legacy_button = ctk.CTkButton(
+            button_frame, text="Legacy Esperanto", command=self.on_legacy
+        )
         self.legacy_button.pack(side="left", padx=10)
 
-        self.new_button = ctk.CTkButton(button_frame, text="New English Diversity", command=self.on_new)
+        self.new_button = ctk.CTkButton(
+            button_frame, text="New English Diversity", command=self.on_new
+        )
         self.new_button.pack(side="left", padx=10)
 
     def on_legacy(self):
@@ -71,7 +79,7 @@ class FormatSelectionDialog(ctk.CTkToplevel):
     def on_new(self):
         self.result = "new"
         self.destroy()
-        
+
     def _on_closing(self):
         self.result = None
         self.destroy()
@@ -83,6 +91,7 @@ class FormatSelectionDialog(ctk.CTkToplevel):
 
 class TextSymbolDialog(ctk.CTkToplevel):
     """A dialog to preview and adjust a text-based symbol before saving."""
+
     def __init__(self, master, text_to_render, *args, **kwargs):
         super().__init__(master, *args, **kwargs)
         self.title("Create Text Symbol")
@@ -95,11 +104,14 @@ class TextSymbolDialog(ctk.CTkToplevel):
         self.text_to_render = text_to_render
         self.result = None
         self.img_size = 512
-        
+
         self.font_map = self._get_system_fonts()
         self.font_names = list(self.font_map.keys())
         if not self.font_names:
-            messagebox.showwarning("Font Not Found", "Could not find any system fonts. Text rendering may fall back to a default font.")
+            messagebox.showwarning(
+                "Font Not Found",
+                "Could not find any system fonts. Text rendering may fall back to a default font.",
+            )
             self.font_names = ["Default"]
             self.font_map = {"Default": None}
 
@@ -119,8 +131,10 @@ class TextSymbolDialog(ctk.CTkToplevel):
         controls_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(controls_frame, text="Font:").grid(row=0, column=0, padx=5, pady=5)
-        self.font_selector = ctk.CTkComboBox(controls_frame, values=self.font_names, command=self.update_preview)
-        
+        self.font_selector = ctk.CTkComboBox(
+            controls_frame, values=self.font_names, command=self.update_preview
+        )
+
         default_font = "Arial"
         if default_font not in self.font_names:
             arial_variants = [f for f in self.font_names if "arial" in f.lower()]
@@ -129,60 +143,90 @@ class TextSymbolDialog(ctk.CTkToplevel):
             else:
                 default_font = self.font_names[0]
         self.font_selector.set(default_font)
-        self.font_selector.grid(row=0, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
+        self.font_selector.grid(
+            row=0, column=1, columnspan=2, padx=5, pady=5, sticky="ew"
+        )
 
-        ctk.CTkLabel(controls_frame, text="Font Size:").grid(row=1, column=0, padx=5, pady=5)
+        ctk.CTkLabel(controls_frame, text="Font Size:").grid(
+            row=1, column=0, padx=5, pady=5
+        )
         self.font_size_var = ctk.IntVar(value=250)
-        self.font_size_slider = ctk.CTkSlider(controls_frame, from_=10, to=500, variable=self.font_size_var, command=self.update_preview)
+        self.font_size_slider = ctk.CTkSlider(
+            controls_frame,
+            from_=10,
+            to=500,
+            variable=self.font_size_var,
+            command=self.update_preview,
+        )
         self.font_size_slider.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-        self.font_size_label = ctk.CTkLabel(controls_frame, textvariable=self.font_size_var, width=35)
+        self.font_size_label = ctk.CTkLabel(
+            controls_frame, textvariable=self.font_size_var, width=35
+        )
         self.font_size_label.grid(row=1, column=2, padx=5, pady=5)
 
         # --- Buttons ---
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         button_frame.grid(row=2, column=0, pady=10)
 
-        self.save_button = ctk.CTkButton(button_frame, text="Save Symbol", command=self.on_save)
+        self.save_button = ctk.CTkButton(
+            button_frame, text="Save Symbol", command=self.on_save
+        )
         self.save_button.pack(side="left", padx=10)
-        
-        self.cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=self._on_cancel, fg_color="gray50")
+
+        self.cancel_button = ctk.CTkButton(
+            button_frame, text="Cancel", command=self._on_cancel, fg_color="gray50"
+        )
         self.cancel_button.pack(side="left", padx=10)
-        
-        self.update_preview() # Initial render
+
+        self.update_preview()  # Initial render
 
     def _get_system_fonts(self):
         """Scans common directories for fonts and returns a map of their names to paths."""
         font_map = {}
         system = platform.system()
-        
+
         if system == "Windows":
-            font_dirs = [os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "Fonts")]
-        elif system == "Darwin": # macOS
-            font_dirs = ["/System/Library/Fonts", "/Library/Fonts", os.path.expanduser("~/Library/Fonts")]
-        else: # Linux
-            font_dirs = ["/usr/share/fonts", "/usr/local/share/fonts", os.path.expanduser("~/.fonts")]
+            font_dirs = [
+                os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "Fonts")
+            ]
+        elif system == "Darwin":  # macOS
+            font_dirs = [
+                "/System/Library/Fonts",
+                "/Library/Fonts",
+                os.path.expanduser("~/Library/Fonts"),
+            ]
+        else:  # Linux
+            font_dirs = [
+                "/usr/share/fonts",
+                "/usr/local/share/fonts",
+                os.path.expanduser("~/.fonts"),
+            ]
 
         for font_dir in font_dirs:
             if os.path.isdir(font_dir):
                 for filename in os.listdir(font_dir):
-                    if filename.lower().endswith(('.ttf', '.otf')):
+                    if filename.lower().endswith((".ttf", ".otf")):
                         font_path = os.path.join(font_dir, filename)
                         try:
                             font = ImageFont.truetype(font_path, 10)
                             name, style = font.getname()
-                            display_name = f"{name} {style}" if style.lower() not in ["regular", "normal", "book"] else name
+                            display_name = (
+                                f"{name} {style}"
+                                if style.lower() not in ["regular", "normal", "book"]
+                                else name
+                            )
                             if display_name not in font_map:
                                 font_map[display_name] = font_path
                         except Exception:
                             continue
-        
+
         return dict(sorted(font_map.items()))
 
     def update_preview(self, *args):
         font_size = self.font_size_var.get()
         selected_font_name = self.font_selector.get()
         font_path = self.font_map.get(selected_font_name)
-        
+
         image = Image.new("RGB", (self.img_size, self.img_size), "white")
         draw = ImageDraw.Draw(image)
 
@@ -194,13 +238,15 @@ class TextSymbolDialog(ctk.CTkToplevel):
                 font = ImageFont.load_default()
         except IOError:
             font = ImageFont.load_default()
-        
-        bbox = draw.textbbox((0,0), self.text_to_render, font=font)
+
+        bbox = draw.textbbox((0, 0), self.text_to_render, font=font)
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
         x = (self.img_size - text_width) / 2
         y = (self.img_size - text_height) / 2
-        draw.text((x - bbox[0], y - bbox[1]), self.text_to_render, fill="black", font=font)
+        draw.text(
+            (x - bbox[0], y - bbox[1]), self.text_to_render, fill="black", font=font
+        )
 
         self.final_image = image
         ctk_image = ctk.CTkImage(light_image=image, size=(self.img_size, self.img_size))
@@ -234,7 +280,9 @@ class SymbolPickerApp:
         choice = dialog.get_choice()
 
         if choice == "legacy":
-            csv_path = "Gabe_Esperanto cards_filtered_cleaned_no_starters_no_jn_rerank.csv"
+            csv_path = (
+                "Gabe_Esperanto cards_filtered_cleaned_no_starters_no_jn_rerank.csv"
+            )
         elif choice == "new":
             csv_path = "en_word_diversity_ranking.csv"
         else:
@@ -299,9 +347,7 @@ class SymbolPickerApp:
 
             if user_choice is True:
                 if self.symbol_picker_page.save_to_current_file():
-                    filename = os.path.basename(
-                        self.symbol_picker_page.output_filename
-                    )
+                    filename = os.path.basename(self.symbol_picker_page.output_filename)
                     messagebox.showinfo("Saved", f"Progress saved to\n{filename}")
                     self.show_start_page()
             elif user_choice is False:
@@ -392,6 +438,7 @@ class StartPage:
             "symbol_source",
             "original_filename",
             "notes",
+            "symbol_data",
         ]:
             if col not in new_df.columns:
                 new_df[col] = pd.NA
@@ -420,9 +467,7 @@ class StartPage:
             total_entries = len(loaded_df)
             message = f"Loaded {total_entries} entries. {completed_count} items have symbols.\n\nStarting at entry {start_index + 1}."
             if completed_count > 0 and start_index == len(loaded_df):
-                message = (
-                    f"Deck is complete with {completed_count} symbols! Loading last entry."
-                )
+                message = f"Deck is complete with {completed_count} symbols! Loading last entry."
                 start_index = len(loaded_df) - 1
             messagebox.showinfo("Deck Loaded", message)
             self.controller.launch_symbol_picker(filename, loaded_df, start_index)
@@ -430,21 +475,28 @@ class StartPage:
             messagebox.showerror("Error", f"Could not load file: {e}")
 
 
-# ---
-# Symbol Picker Page
-# ---
 class SymbolPickerPage:
     def __init__(self, master, controller):
         self.master = master
         self.root = controller.root
         self.controller = controller
         self.autosave_var = ctk.BooleanVar(value=True)
+        self.multi_select_mode = ctk.BooleanVar(value=False)
+        self.separator_font_path = (
+            self._find_system_font()
+        )  # <-- NEW: Find a reliable font on startup
 
         self.source_column_map = {
-            "Mulberry": 0, "OpenMoji": 0, "Picom": 0, "Flaticon": 0,
-            "Sclera": 1, "Bliss": 1, "ARASAAC": 1
+            "Mulberry": 0,
+            "OpenMoji": 0,
+            "Picom": 0,
+            "Flaticon": 0,
+            "Sclera": 1,
+            "Bliss": 1,
+            "ARASAAC": 1,
         }
 
+        # --- (The rest of the __init__ method remains the same) ---
         # --- ARASAAC Caching Setup ---
         self.arasaac_metadata_path = os.path.join(ARASAAC_CACHE_DIR, "metadata.csv")
         os.makedirs(ARASAAC_CACHE_DIR, exist_ok=True)
@@ -475,45 +527,53 @@ class SymbolPickerPage:
             print("Loading Picom symbols...")
             picom_path = "picom-symbols/picom-og-symbols"
             picom_data = []
-            for filename in os.listdir(picom_path):
-                if filename.endswith(".png"):
-                    base_name, _ = os.path.splitext(filename)
-                    parts = base_name.rsplit("_", 1)
-                    if len(parts) == 2:
-                        symbol_name = parts[0]
-                        picom_data.append(
-                            {
-                                "name": symbol_name,
-                                "path": os.path.join(picom_path, filename),
-                            }
-                        )
-            self.picom_df = pd.DataFrame(picom_data)
-            print(f"Loaded {len(self.picom_df)} Picom symbols.")
+            if os.path.exists(picom_path):
+                for filename in os.listdir(picom_path):
+                    if filename.endswith(".png"):
+                        base_name, _ = os.path.splitext(filename)
+                        parts = base_name.rsplit("_", 1)
+                        if len(parts) == 2:
+                            symbol_name = parts[0]
+                            picom_data.append(
+                                {
+                                    "name": symbol_name,
+                                    "path": os.path.join(picom_path, filename),
+                                }
+                            )
+                self.picom_df = pd.DataFrame(picom_data)
+                print(f"Loaded {len(self.picom_df)} Picom symbols.")
+            else:
+                self.picom_df = pd.DataFrame()
+                print("Warning: Picom symbol directory not found.")
 
             # Pre-load Sclera Symbols from filenames
             print("Loading Sclera symbols...")
             sclera_path = "sclera-symbols/"
             sclera_data = []
-            for filename in os.listdir(sclera_path):
-                if filename.endswith(".png"):
-                    base_name, _ = os.path.splitext(filename)
-                    parts = base_name.rsplit("_", 1)
-                    if len(parts) == 2 and parts[1].isdigit():
-                        search_term = parts[0].replace("-", " ").replace("_", " ")
-                        display_name = f"{search_term} {parts[1]}"
-                    else:
-                        search_term = base_name.replace("-", " ").replace("_", " ")
-                        display_name = search_term
+            if os.path.exists(sclera_path):
+                for filename in os.listdir(sclera_path):
+                    if filename.endswith(".png"):
+                        base_name, _ = os.path.splitext(filename)
+                        parts = base_name.rsplit("_", 1)
+                        if len(parts) == 2 and parts[1].isdigit():
+                            search_term = parts[0].replace("-", " ").replace("_", " ")
+                            display_name = f"{search_term} {parts[1]}"
+                        else:
+                            search_term = base_name.replace("-", " ").replace("_", " ")
+                            display_name = search_term
 
-                    sclera_data.append(
-                        {
-                            "name": display_name,
-                            "search_term": search_term,
-                            "path": os.path.join(sclera_path, filename),
-                        }
-                    )
-            self.sclera_df = pd.DataFrame(sclera_data)
-            print(f"Loaded {len(self.sclera_df)} Sclera symbols.")
+                        sclera_data.append(
+                            {
+                                "name": display_name,
+                                "search_term": search_term,
+                                "path": os.path.join(sclera_path, filename),
+                            }
+                        )
+                self.sclera_df = pd.DataFrame(sclera_data)
+                print(f"Loaded {len(self.sclera_df)} Sclera symbols.")
+            else:
+                self.sclera_df = pd.DataFrame()
+                print("Warning: Sclera symbol directory not found.")
 
             # Pre-load Bliss Symbols from the pre-processed folder
             print("Loading Bliss symbols...")
@@ -547,16 +607,133 @@ class SymbolPickerPage:
 
         self.setup_gui()
 
+    # --- NEW HELPER FUNCTION TO FIND A FONT ---
+    def _find_system_font(self):
+        """Find a reliable TTF font path on the current OS."""
+        system = platform.system()
+        if system == "Windows":
+            font_path = os.path.join(
+                os.environ.get("SystemRoot", "C:\\Windows"), "Fonts", "arial.ttf"
+            )
+            if os.path.exists(font_path):
+                print(f"Found font: {font_path}")
+                return font_path
+        elif system == "Darwin":  # macOS
+            paths = [
+                "/System/Library/Fonts/Supplemental/Arial.ttf",
+                "/System/Library/Fonts/Arial.ttf",
+            ]
+            for path in paths:
+                if os.path.exists(path):
+                    print(f"Found font: {path}")
+                    return path
+        else:  # Linux
+            paths = [
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            ]
+            for path in paths:
+                if os.path.exists(path):
+                    print(f"Found font: {path}")
+                    return path
+
+        print(
+            "Warning: Could not find a default system font for separator. Falling back."
+        )
+        return None
+
+    def combine_and_save_symbols(self):
+        if not self.current_selection:
+            messagebox.showwarning(
+                "No Selection", "Please select one or more symbols to save."
+            )
+            return
+
+        symbol_names = [s["symbol_info"]["name"] for s in self.current_selection]
+        symbol_sources = [s["source"] for s in self.current_selection]
+        symbol_data_list = [
+            {
+                "name": s["symbol_info"]["name"],
+                "source": s["source"],
+                "original_filename": s["symbol_info"].get("original_filename", "N/A"),
+            }
+            for s in self.current_selection
+        ]
+        symbol_data_json = json.dumps(symbol_data_list)
+
+        sanitized_word = (
+            "".join(x for x in self.base_word_for_filename if x.isalnum())
+            or f"entry{self.current_index}"
+        )
+
+        IMG_SIZE = 512
+        SEPARATOR_WIDTH = 100
+
+        separator_image = Image.new("RGBA", (SEPARATOR_WIDTH, IMG_SIZE), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(separator_image)
+
+        # --- UPDATED FONT LOGIC ---
+        try:
+            # Use the pre-found font path and the new, larger size
+            font_size = 200  # <-- INCREASED SIZE
+            if self.separator_font_path:
+                font = ImageFont.truetype(self.separator_font_path, font_size)
+            else:
+                # Fallback if no font was found at all
+                font = ImageFont.load_default()
+        except IOError:
+            font = ImageFont.load_default()
+
+        draw.text(
+            (SEPARATOR_WIDTH / 2, IMG_SIZE / 2),
+            "||",
+            font=font,
+            fill="black",
+            anchor="mm",
+        )
+
+        num_symbols = len(self.current_selection)
+        total_width = (IMG_SIZE * num_symbols) + (SEPARATOR_WIDTH * (num_symbols - 1))
+
+        combined_image = Image.new("RGBA", (total_width, IMG_SIZE), (255, 255, 255, 0))
+
+        x_offset = 0
+        for i, item in enumerate(self.current_selection):
+            img = item["image_obj"].resize(
+                (IMG_SIZE, IMG_SIZE), Image.Resampling.LANCZOS
+            )
+            combined_image.paste(img, (x_offset, 0), img)
+            x_offset += IMG_SIZE
+
+            if i < num_symbols - 1:
+                combined_image.paste(separator_image, (x_offset, 0), separator_image)
+                x_offset += SEPARATOR_WIDTH
+
+        final_filename = f"{sanitized_word}_Combined_{int(time.time())}.png"
+        destination_path = os.path.join(SELECTED_SYMBOLS_DIR, final_filename)
+        self._save_pil_image(combined_image, destination_path)
+
+        self._commit_symbol(
+            final_filename, " / ".join(symbol_names), "Combined", symbol_data_json
+        )
+        self.toggle_multi_select_mode()
+        self.next_word()
+
+    # --- (The rest of the SymbolPickerPage class remains the same) ---
+    # (reload, setup_gui, disable_root_key_bindings, etc... all the way to the end)
     def reload(self, output_filename, dataframe, start_index=0):
         self.output_filename = output_filename
         self.output_df = dataframe
         self.current_index = start_index
         self.symbol_buttons, self.cached_results = [], {}
+        self.symbol_buttons_data = []  # <-- Store data for keyboard nav
         self.selected_index, self.current_search_id = -1, 0
         self.source_frames = {}
         self.source_counters = {}
         self.column_row_counters = {0: 0, 1: 0}
         self.results_queue = Queue()
+        self.current_selection = []
         # Navigation grid attributes
         self.nav_grid_dirty = True
         self.nav_grid = []
@@ -616,34 +793,53 @@ class SymbolPickerPage:
             padx=int(PADDING_NORMAL * UI_SCALE),
             pady=int(PADDING_SMALL * UI_SCALE),
         )
-        
-        # --- Custom Search and Text Symbol Controls ---
+
         search_controls_frame = ctk.CTkFrame(controls_frame, fg_color="transparent")
         search_controls_frame.pack(side="left", fill="x", expand=True)
-
-        ctk.CTkLabel(search_controls_frame, text="Custom Search:", font=self.normal_font).grid(row=0, column=0, sticky="w", padx=(0, int(PADDING_SMALL * UI_SCALE)))
+        ctk.CTkLabel(
+            search_controls_frame, text="Custom Search:", font=self.normal_font
+        ).grid(row=0, column=0, sticky="w", padx=(0, int(PADDING_SMALL * UI_SCALE)))
         self.custom_search_entry = ctk.CTkEntry(
-            search_controls_frame, width=int(ENTRY_WIDTH * UI_SCALE), font=self.normal_font
+            search_controls_frame,
+            width=int(ENTRY_WIDTH * UI_SCALE),
+            font=self.normal_font,
         )
         self.custom_search_entry.grid(row=0, column=1, sticky="w")
         self.custom_search_entry.bind("<Return>", lambda e: self.refresh_symbol_grid())
         self.custom_search_entry.bind("<FocusIn>", self.disable_root_key_bindings)
         self.custom_search_entry.bind("<FocusOut>", self.enable_root_key_bindings)
-
-        ctk.CTkLabel(search_controls_frame, text="Text Symbol:", font=self.normal_font).grid(row=1, column=0, sticky="w", pady=(5,0), padx=(0, int(PADDING_SMALL * UI_SCALE)))
-        self.text_symbol_entry = ctk.CTkEntry(search_controls_frame, width=int(ENTRY_WIDTH * UI_SCALE * 0.6), font=self.normal_font)
-        self.text_symbol_entry.grid(row=1, column=1, sticky="w", pady=(5,0))
+        ctk.CTkLabel(
+            search_controls_frame, text="Text Symbol:", font=self.normal_font
+        ).grid(
+            row=1,
+            column=0,
+            sticky="w",
+            pady=(5, 0),
+            padx=(0, int(PADDING_SMALL * UI_SCALE)),
+        )
+        self.text_symbol_entry = ctk.CTkEntry(
+            search_controls_frame,
+            width=int(ENTRY_WIDTH * UI_SCALE * 0.6),
+            font=self.normal_font,
+        )
+        self.text_symbol_entry.grid(row=1, column=1, sticky="w", pady=(5, 0))
         self.text_symbol_entry.bind("<FocusIn>", self.disable_root_key_bindings)
         self.text_symbol_entry.bind("<FocusOut>", self.enable_root_key_bindings)
-        
-        self.create_symbol_button = ctk.CTkButton(search_controls_frame, text="Create", command=self.create_text_symbol, width=int(ENTRY_WIDTH*0.3))
-        self.create_symbol_button.grid(row=1, column=2, sticky="w", pady=(5,0), padx=5)
+        self.create_symbol_button = ctk.CTkButton(
+            search_controls_frame,
+            text="Create",
+            command=self.create_text_symbol,
+            width=int(ENTRY_WIDTH * 0.3),
+        )
+        self.create_symbol_button.grid(row=1, column=2, sticky="w", pady=(5, 0), padx=5)
 
-        # --- Display Controls ---
         display_controls_frame = ctk.CTkFrame(controls_frame, fg_color="transparent")
-        display_controls_frame.pack(side="left", padx=(int(PADDING_LARGE * UI_SCALE), 0))
-        
-        ctk.CTkLabel(display_controls_frame, text="Icon Size:", font=self.normal_font).grid(row=0, column=0, padx=(0, int(PADDING_SMALL * UI_SCALE)))
+        display_controls_frame.pack(
+            side="left", padx=(int(PADDING_LARGE * UI_SCALE), 0)
+        )
+        ctk.CTkLabel(
+            display_controls_frame, text="Icon Size:", font=self.normal_font
+        ).grid(row=0, column=0, padx=(0, int(PADDING_SMALL * UI_SCALE)))
         self.size_dropdown = ctk.CTkComboBox(
             display_controls_frame,
             values=list(self.size_map.keys()),
@@ -653,8 +849,9 @@ class SymbolPickerPage:
         )
         self.size_dropdown.set("Medium")
         self.size_dropdown.grid(row=0, column=1)
-        
-        ctk.CTkLabel(display_controls_frame, text="Padding:", font=self.normal_font).grid(row=1, column=0, pady=(5,0), padx=(0, int(PADDING_SMALL * UI_SCALE)))
+        ctk.CTkLabel(
+            display_controls_frame, text="Padding:", font=self.normal_font
+        ).grid(row=1, column=0, pady=(5, 0), padx=(0, int(PADDING_SMALL * UI_SCALE)))
         self.padding_dropdown = ctk.CTkComboBox(
             display_controls_frame,
             values=list(self.padding_map.keys()),
@@ -663,7 +860,7 @@ class SymbolPickerPage:
             font=self.normal_font,
         )
         self.padding_dropdown.set("Medium")
-        self.padding_dropdown.grid(row=1, column=1, pady=(5,0))
+        self.padding_dropdown.grid(row=1, column=1, pady=(5, 0))
 
         search_buttons_frame = ctk.CTkFrame(self.main_frame)
         search_buttons_frame.grid(
@@ -688,6 +885,17 @@ class SymbolPickerPage:
         self.flaticon_button.pack(
             side="left", padx=int(PADDING_SMALL * UI_SCALE), ipady=button_ipadding
         )
+
+        self.multi_select_toggle_button = ctk.CTkButton(
+            search_buttons_frame,
+            text="Select Multiple",
+            command=self.toggle_multi_select_mode,
+            font=self.normal_font,
+        )
+        self.multi_select_toggle_button.pack(
+            side="left", padx=(int(PADDING_LARGE * UI_SCALE), 0), ipady=button_ipadding
+        )
+
         self.scrollable_frame = ctk.CTkScrollableFrame(
             self.main_frame, label_text="Symbols", label_font=self.normal_font
         )
@@ -709,9 +917,40 @@ class SymbolPickerPage:
             font=self.normal_font,
         ).pack(pady=int(PADDING_LARGE * UI_SCALE), ipady=button_ipadding)
         self.existing_symbol_frame.grid_remove()
+
+        self.selection_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.selection_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        self.selection_frame.grid_columnconfigure(1, weight=1)
+        self.selection_preview_frame = ctk.CTkScrollableFrame(
+            self.selection_frame,
+            label_text="Current Selection",
+            label_font=self.normal_font,
+            orientation="horizontal",
+            height=120,
+        )
+        self.selection_preview_frame.grid(
+            row=0, column=0, columnspan=3, sticky="ew", pady=5
+        )
+        button_container = ctk.CTkFrame(self.selection_frame, fg_color="transparent")
+        button_container.grid(row=1, column=1, sticky="e")
+        self.combine_button = ctk.CTkButton(
+            button_container,
+            text="Combine & Save",
+            command=self.combine_and_save_symbols,
+        )
+        self.combine_button.pack(side="left", padx=5)
+        self.clear_button = ctk.CTkButton(
+            button_container,
+            text="Clear",
+            command=self.clear_selection,
+            fg_color="gray50",
+        )
+        self.clear_button.pack(side="left", padx=5)
+        self.selection_frame.grid_forget()  # Hide by default
+
         nav_frame = ctk.CTkFrame(self.main_frame)
         nav_frame.grid(
-            row=3, column=0, sticky="ew", pady=(int(PADDING_NORMAL * UI_SCALE), 0)
+            row=4, column=0, sticky="ew", pady=(int(PADDING_NORMAL * UI_SCALE), 0)
         )
         nav_frame.grid_columnconfigure(1, weight=1)
         self.prev_button = ctk.CTkButton(
@@ -742,22 +981,27 @@ class SymbolPickerPage:
         self.next_button.grid(
             row=0, column=2, padx=int(PADDING_SMALL * UI_SCALE), ipady=button_ipadding
         )
-        
-        # --- Notes Frame ---
+
         notes_frame = ctk.CTkFrame(self.main_frame)
-        notes_frame.grid(row=4, column=0, sticky="ew", pady=int(PADDING_NORMAL * UI_SCALE))
+        notes_frame.grid(
+            row=5, column=0, sticky="ew", pady=int(PADDING_NORMAL * UI_SCALE)
+        )
         notes_frame.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(notes_frame, text="Note:", font=self.normal_font).pack(side="left", padx=(10, 5))
+        ctk.CTkLabel(notes_frame, text="Note:", font=self.normal_font).pack(
+            side="left", padx=(10, 5)
+        )
         self.note_entry = ctk.CTkEntry(notes_frame, font=self.normal_font)
         self.note_entry.pack(side="left", expand=True, fill="x", padx=5)
         self.note_entry.bind("<FocusIn>", self.disable_root_key_bindings)
         self.note_entry.bind("<FocusOut>", self.enable_root_key_bindings)
-        self.add_note_button = ctk.CTkButton(notes_frame, text="Add Note", command=self.add_note, font=self.normal_font)
+        self.add_note_button = ctk.CTkButton(
+            notes_frame, text="Add Note", command=self.add_note, font=self.normal_font
+        )
         self.add_note_button.pack(side="left", padx=(5, 10))
 
         bottom_frame = ctk.CTkFrame(self.main_frame)
         bottom_frame.grid(
-            row=5, column=0, sticky="ew", pady=int(PADDING_NORMAL * UI_SCALE)
+            row=6, column=0, sticky="ew", pady=int(PADDING_NORMAL * UI_SCALE)
         )
         bottom_frame.grid_columnconfigure(1, weight=1)
         self.autosave_checkbox = ctk.CTkCheckBox(
@@ -778,64 +1022,63 @@ class SymbolPickerPage:
         self.enable_root_key_bindings(None)
 
     def add_note(self):
-        """Adds the text from the note entry to the current row in the dataframe."""
         note_text = self.note_entry.get()
         if not note_text:
             return
-
         if "notes" not in self.output_df.columns:
             self.output_df["notes"] = pd.NA
-        
-        # Use .loc to ensure the value is set correctly
         self.output_df.loc[self.current_index, "notes"] = note_text
         print(f"Note added for index {self.current_index}: {note_text}")
-        
-        # Clear the entry box after adding the note
         self.note_entry.delete(0, "end")
-        
         self.auto_save()
 
     def create_text_symbol(self):
-        """Opens a dialog to create a symbol from user-provided text."""
         user_text = self.text_symbol_entry.get().strip()
         if not user_text:
             return
-
         dialog = TextSymbolDialog(self.root, text_to_render=user_text)
         final_image = dialog.get_result()
 
         if final_image:
-            try:
-                # Save the image returned from the dialog
-                sanitized_text = "".join(c for c in user_text if c.isalnum()) or "custom"
-                sanitized_word = "".join(x for x in self.base_word_for_filename if x.isalnum()) or f"entry{self.current_index}"
-                filename = f"{sanitized_word}_Custom_{sanitized_text}.png"
-                destination_path = os.path.join(SELECTED_SYMBOLS_DIR, filename)
-                final_image.save(destination_path)
+            symbol_info = {"name": user_text, "original_filename": "custom_text.png"}
 
-                # Commit the new symbol to the dataframe
-                self._commit_symbol(filename, user_text, "Custom Text", filename)
-                self.text_symbol_entry.delete(0, "end")
-            except Exception as e:
-                messagebox.showerror("Error", f"Could not save text symbol: {e}")
+            if self.multi_select_mode.get():
+                self.add_to_selection(
+                    symbol_info, "Custom Text", final_image, "image_obj"
+                )
+            else:
+                self.select_single_symbol(
+                    symbol_info, "Custom Text", final_image, "image_obj"
+                )
 
-    def _commit_symbol(self, filename, symbol_name, source, original_filename):
-        """Helper function to update the DataFrame, save, and advance."""
-        # Ensure 'notes' column exists before trying to access it.
+            self.text_symbol_entry.delete(0, "end")
+
+    def _commit_symbol(self, filename, symbol_name, source, symbol_data_json):
         if "notes" not in self.output_df.columns:
-            self.output_df['notes'] = pd.NA
-        
+            self.output_df["notes"] = pd.NA
+        if "symbol_data" not in self.output_df.columns:
+            self.output_df["symbol_data"] = pd.NA
+
         self.output_df.loc[
             self.current_index,
-            ["symbol_filename", "symbol_name", "symbol_source", "original_filename"],
+            [
+                "symbol_filename",
+                "symbol_name",
+                "symbol_source",
+                "symbol_data",
+                "original_filename",
+            ],
         ] = [
             filename,
             symbol_name,
             source,
-            original_filename,
-        ]
+            symbol_data_json,
+            "",
+        ]  # Clear old original_filename column
+
         self.auto_save()
-        self.next_word()
+        if not self.multi_select_mode.get():  # Only auto-advance in single mode
+            self.next_word()
 
     def get_current_icon_size(self):
         return self.size_map.get(self.size_dropdown.get(), 128)
@@ -852,11 +1095,9 @@ class SymbolPickerPage:
     def redraw_grid_from_cache(self):
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
-        self.source_frames = {}
-        self.source_counters = {}
+        self.source_frames, self.source_counters = {}, {}
         self.column_row_counters = {0: 0, 1: 0}
-        self.selected_index = -1
-        self.symbol_buttons = []
+        self.selected_index, self.symbol_buttons, self.symbol_buttons_data = -1, [], []
         self.nav_grid_dirty = True
         for source in [
             "Mulberry",
@@ -884,15 +1125,18 @@ class SymbolPickerPage:
         self.scrollable_frame.grid_remove()
         self.existing_symbol_frame.grid(row=2, column=0, sticky="nsew")
         try:
-            filename, symbol_name, source = self.output_df.loc[
-                self.current_index, ["symbol_filename", "symbol_name", "symbol_source"]
-            ]
+            row = self.output_df.loc[self.current_index]
+            filename, symbol_name, source = (
+                row["symbol_filename"],
+                row["symbol_name"],
+                row["symbol_source"],
+            )
             filepath = os.path.join(SELECTED_SYMBOLS_DIR, filename)
-
             display_size_max = int(256 * UI_SCALE)
             final_image_for_display = None
 
             if filepath.endswith(".svg"):
+                # This should now work because the file is a real SVG
                 image_data = cairosvg.svg2png(
                     url=filepath,
                     output_width=display_size_max,
@@ -901,36 +1145,20 @@ class SymbolPickerPage:
                 final_image_for_display = Image.open(BytesIO(image_data))
             else:
                 image = Image.open(filepath)
-                original_width, original_height = image.size
-                if original_height > 0:
-                    aspect_ratio = original_width / original_height
-
-                    if aspect_ratio >= 1:  # Wider or square
-                        final_width = display_size_max
-                        final_height = int(display_size_max / aspect_ratio)
-                    else:  # Taller
-                        final_height = display_size_max
-                        final_width = int(display_size_max * aspect_ratio)
-
-                    resized_image = image.resize(
-                        (max(1, final_width), max(1, final_height)),
-                        Image.Resampling.LANCZOS,
-                    )
-
-                    padded_image = Image.new(
-                        "RGBA", (display_size_max, display_size_max), (0, 0, 0, 0)
-                    )
-                    paste_x = (display_size_max - final_width) // 2
-                    paste_y = (display_size_max - final_height) // 2
-                    if resized_image.mode == "RGBA":
-                        padded_image.paste(
-                            resized_image, (paste_x, paste_y), resized_image
-                        )
-                    else:
-                        padded_image.paste(resized_image, (paste_x, paste_y))
-                    final_image_for_display = padded_image
-                else:
-                    final_image_for_display = image
+                image.thumbnail(
+                    (display_size_max, display_size_max), Image.Resampling.LANCZOS
+                )
+                padded_image = Image.new(
+                    "RGBA", (display_size_max, display_size_max), (0, 0, 0, 0)
+                )
+                paste_pos = (
+                    (display_size_max - image.width) // 2,
+                    (display_size_max - image.height) // 2,
+                )
+                padded_image.paste(
+                    image, paste_pos, image if image.mode == "RGBA" else None
+                )
+                final_image_for_display = padded_image
 
             ctk_image = ctk.CTkImage(
                 light_image=final_image_for_display,
@@ -957,10 +1185,8 @@ class SymbolPickerPage:
         query = self.custom_search_entry.get().strip() or self.current_word
         if query == "(No Word)":
             return
-        self.selected_index = -1
-        self.source_frames = {}
-        self.source_counters = {}
-        self.symbol_buttons = []
+        self.selected_index, self.source_frames, self.source_counters = -1, {}, {}
+        self.symbol_buttons, self.symbol_buttons_data = [], []
         self.nav_grid_dirty = True
         self.flaticon_button.configure(state="normal")
         self.process_local_search_batch(self.search_mulberry(query), "Mulberry")
@@ -979,10 +1205,7 @@ class SymbolPickerPage:
         self.process_queue()
 
     def start_threaded_searches(self, query, sources=[]):
-        search_map = {
-            "Flaticon": self.search_flaticon,
-            "ARASAAC": self.search_arasaac,
-        }
+        search_map = {"Flaticon": self.search_flaticon, "ARASAAC": self.search_arasaac}
         for source_name in sources:
             if source_name in search_map:
                 search_func = search_map[source_name]
@@ -1000,10 +1223,11 @@ class SymbolPickerPage:
         self.start_threaded_searches(query, sources=["Flaticon"])
 
     def run_search_in_thread(self, search_func, query, source, search_id):
-        if source == "ARASAAC":
-            symbol_metadata_generator = search_func(query, self.current_index)
-        else:
-            symbol_metadata_generator = search_func(query)
+        symbol_metadata_generator = (
+            search_func(query, self.current_index)
+            if source == "ARASAAC"
+            else search_func(query)
+        )
         if not symbol_metadata_generator:
             return
         for symbol in symbol_metadata_generator:
@@ -1049,22 +1273,19 @@ class SymbolPickerPage:
         if source not in self.source_frames:
             column_index = self.source_column_map.get(source, 0)
             row_index = self.column_row_counters[column_index]
-
             container = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent")
-            container.grid(row=row_index, column=column_index, sticky="new", pady=(10,0), padx=5)
+            container.grid(
+                row=row_index, column=column_index, sticky="new", pady=(10, 0), padx=5
+            )
             self.column_row_counters[column_index] += 1
-
             header = ctk.CTkLabel(
                 container, text=f"--- {source} ---", font=self.header_font
             )
             header.pack(side="top", anchor="w", padx=5)
-
             grid_frame = ctk.CTkFrame(container, fg_color="transparent")
             grid_frame.pack(side="top", fill="x")
-
             self.source_frames[source] = grid_frame
             self.source_counters[source] = {"row": 0, "col": 0}
-
         return self.source_frames[source], self.source_counters[source]
 
     def display_symbol(self, source, symbol, data, data_type):
@@ -1072,55 +1293,31 @@ class SymbolPickerPage:
             self.nav_grid_dirty = True
             parent_frame, counters = self._get_or_create_source_frame(source)
             current_size = self.get_current_icon_size()
-            image_data = None
-            if data_type == "svg_path":
-                image_data = cairosvg.svg2png(
-                    url=data, output_width=current_size, output_height=current_size
-                )
-            elif data_type in ["raster_data", "png_data"]:
-                image_data = data
+            image_obj = self._get_image_obj(data, data_type)
+            if not image_obj:
+                return
 
-            image = Image.open(BytesIO(image_data))
-
-            original_width, original_height = image.size
-            if original_height > 0:
-                aspect_ratio = original_width / original_height
-
-                if aspect_ratio >= 1:
-                    final_width = current_size
-                    final_height = int(current_size / aspect_ratio)
-                else:
-                    final_height = current_size
-                    final_width = int(current_size * aspect_ratio)
-
-                resized_image = image.resize(
-                    (max(1, final_width), max(1, final_height)),
-                    Image.Resampling.LANCZOS,
-                )
-
-                padded_image = Image.new(
-                    "RGBA", (current_size, current_size), (0, 0, 0, 0)
-                )
-                paste_x = (current_size - final_width) // 2
-                paste_y = (current_size - final_height) // 2
-
-                if resized_image.mode == "RGBA":
-                    padded_image.paste(resized_image, (paste_x, paste_y), resized_image)
-                else:
-                    padded_image.paste(resized_image, (paste_x, paste_y))
-                final_image_for_display = padded_image
-            else:
-                final_image_for_display = image
+            image_obj.thumbnail((current_size, current_size), Image.Resampling.LANCZOS)
+            padded_image = Image.new("RGBA", (current_size, current_size), (0, 0, 0, 0))
+            paste_pos = (
+                (current_size - image_obj.width) // 2,
+                (current_size - image_obj.height) // 2,
+            )
+            padded_image.paste(
+                image_obj, paste_pos, image_obj if image_obj.mode == "RGBA" else None
+            )
 
             ctk_image = ctk.CTkImage(
-                light_image=final_image_for_display, size=(current_size, current_size)
+                light_image=padded_image, size=(current_size, current_size)
             )
             btn = ctk.CTkButton(
                 parent_frame,
                 image=ctk_image,
                 text=symbol["name"][:30],
                 compound="top",
-                command=lambda s=symbol, src=source: self.select_symbol(s, src),
+                command=lambda s=symbol, src=source, d=data, dt=data_type: self.handle_symbol_click(
+                    s, src, d, dt
+                ),
                 fg_color="transparent",
                 border_width=0,
                 text_color=("black", "white"),
@@ -1132,12 +1329,20 @@ class SymbolPickerPage:
                 padx=self.get_current_padding(),
                 pady=self.get_current_padding(),
             )
+
             self.symbol_buttons.append(btn)
+            self.symbol_buttons_data.append(
+                {
+                    "symbol": symbol,
+                    "source": source,
+                    "data": data,
+                    "data_type": data_type,
+                }
+            )
 
             counters["col"] = (counters["col"] + 1) % MAX_GRID_COLUMNS
             if counters["col"] == 0:
                 counters["row"] += 1
-
             if self.selected_index == -1 and self.symbol_buttons:
                 self.selected_index = 0
                 self.update_selection_highlight()
@@ -1208,12 +1413,14 @@ class SymbolPickerPage:
                 )
                 if i != 0:
                     btn.configure(fg_color="gray50")
-        
-        # --- Update Note Entry ---
+
         self.note_entry.delete(0, "end")
-        if "notes" in self.output_df.columns and pd.notna(self.output_df.loc[self.current_index, "notes"]):
-            existing_note = self.output_df.loc[self.current_index, "notes"]
-            self.note_entry.insert(0, str(existing_note))
+        if "notes" in self.output_df.columns and pd.notna(
+            self.output_df.loc[self.current_index, "notes"]
+        ):
+            self.note_entry.insert(
+                0, str(self.output_df.loc[self.current_index, "notes"])
+            )
 
     def switch_search_term(self, new_word):
         self.current_word = new_word
@@ -1244,74 +1451,64 @@ class SymbolPickerPage:
             self.index_entry.insert(0, str(self.current_index + 1))
 
     def _build_nav_grid(self):
-        """Builds a 2D list of buttons based on their visual layout for navigation."""
         if not self.symbol_buttons:
-            self.nav_grid = []
-            self.button_to_coords = {}
+            self.nav_grid, self.button_to_coords = [], {}
             return
-
         self.root.update_idletasks()
-        
         buttons_by_row_y = {}
         for btn in self.symbol_buttons:
-            # Absolute Y coordinate relative to the scrollable frame's inner canvas
             abs_y = btn.winfo_y() + btn.master.master.winfo_y()
-            
             found_row = False
             for y_key in buttons_by_row_y:
-                if abs(abs_y - y_key) < 20:  # Tolerance to group buttons on same visual row
+                if abs(abs_y - y_key) < 20:
                     buttons_by_row_y[y_key].append(btn)
                     found_row = True
                     break
             if not found_row:
                 buttons_by_row_y[abs_y] = [btn]
-
         sorted_y_keys = sorted(buttons_by_row_y.keys())
-        
         self.nav_grid = []
         for y in sorted_y_keys:
-            # Sort buttons in each row by their absolute X coordinate
-            row_buttons = sorted(buttons_by_row_y[y], key=lambda b: b.winfo_x() + b.master.master.winfo_x())
+            row_buttons = sorted(
+                buttons_by_row_y[y],
+                key=lambda b: b.winfo_x() + b.master.master.winfo_x(),
+            )
             self.nav_grid.append(row_buttons)
-
         self.button_to_coords = {}
         for r, row_list in enumerate(self.nav_grid):
             for c, btn in enumerate(row_list):
                 self.button_to_coords[btn] = (r, c)
-        
         self.nav_grid_dirty = False
 
     def on_key_press(self, event):
-        if not self.symbol_buttons or self.selected_index == -1:
+        if not self.symbol_buttons or self.selected_index < 0:
             return
-
         key = event.keysym
         if key == "Return":
-            self.symbol_buttons[self.selected_index].invoke()
+            if 0 <= self.selected_index < len(self.symbol_buttons_data):
+                data = self.symbol_buttons_data[self.selected_index]
+                self.handle_symbol_click(
+                    data["symbol"], data["source"], data["data"], data["data_type"]
+                )
             return
 
         if self.nav_grid_dirty:
             self._build_nav_grid()
-
         if not self.nav_grid:
             return
-
         current_btn = self.symbol_buttons[self.selected_index]
         if current_btn not in self.button_to_coords:
             self._build_nav_grid()
             if current_btn not in self.button_to_coords:
-                return 
-
+                return
         r, c = self.button_to_coords[current_btn]
         new_r, new_c = r, c
-
         if key == "Right":
             new_c += 1
             if new_c >= len(self.nav_grid[r]):
-                new_c = 0
-                new_r += 1
+                new_c, new_r = 0, new_r + 1
                 if new_r >= len(self.nav_grid):
-                    new_r = 0 
+                    new_r = 0
         elif key == "Left":
             new_c -= 1
             if new_c < 0:
@@ -1320,25 +1517,18 @@ class SymbolPickerPage:
                     new_r = len(self.nav_grid) - 1
                 new_c = len(self.nav_grid[new_r]) - 1
         elif key == "Down":
-            new_r += 1
-            if new_r >= len(self.nav_grid):
-                new_r = r 
-            else:
-                new_c = min(c, len(self.nav_grid[new_r]) - 1)
+            new_r = min(r + 1, len(self.nav_grid) - 1)
+            new_c = min(c, len(self.nav_grid[new_r]) - 1)
         elif key == "Up":
-            new_r -= 1
-            if new_r < 0:
-                new_r = r 
-            else:
-                new_c = min(c, len(self.nav_grid[new_r]) - 1)
+            new_r = max(r - 1, 0)
+            new_c = min(c, len(self.nav_grid[new_r]) - 1)
 
         try:
             new_button = self.nav_grid[new_r][new_c]
             new_index = self.symbol_buttons.index(new_button)
             self.selected_index = new_index
             self.update_selection_highlight()
-        except IndexError:
-            # Failsafe in case grid is somehow out of sync
+        except (IndexError, ValueError):
             pass
 
     def update_selection_highlight(self):
@@ -1356,42 +1546,126 @@ class SymbolPickerPage:
             else:
                 button.configure(border_width=0)
 
-    def select_symbol(self, symbol, source):
+    # +++ LOGIC FOR MODE-SWITCHING AND SELECTION +++
+
+    def toggle_multi_select_mode(self):
+        """Switches between single and multi-symbol selection modes."""
+        is_multi = not self.multi_select_mode.get()
+        self.multi_select_mode.set(is_multi)
+
+        if is_multi:
+            self.multi_select_toggle_button.configure(text="Cancel", fg_color="gray50")
+            self.selection_frame.grid()
+        else:
+            self.multi_select_toggle_button.configure(
+                text="Select Multiple",
+                fg_color=ctk.ThemeManager.theme["CTkButton"]["fg_color"],
+            )
+            self.selection_frame.grid_forget()
+            self.clear_selection()
+
+    def handle_symbol_click(self, symbol, source, data, data_type):
+        """Central handler that directs action based on the current selection mode."""
+        if self.multi_select_mode.get():
+            self.add_to_selection(symbol, source, data, data_type)
+        else:
+            self.select_single_symbol(symbol, source, data, data_type)
+
+    def select_single_symbol(self, symbol, source, data, data_type):
+        """Saves a single selected symbol and advances to the next item."""
         try:
+            os.makedirs(SELECTED_SYMBOLS_DIR, exist_ok=True)
             sanitized_word = (
                 "".join(x for x in self.base_word_for_filename if x.isalnum())
                 or f"entry{self.current_index}"
             )
-            # Simplified saving logic: all local files are copied directly.
+            original_filename = symbol.get("original_filename", "custom.png")
+            final_filename = f"{sanitized_word}_{source}_{original_filename}"
+            destination_path = os.path.join(SELECTED_SYMBOLS_DIR, final_filename)
+
             if "path" in symbol and os.path.exists(symbol["path"]):
-                original_filepath = symbol["path"]
-                original_filename = os.path.basename(original_filepath)
-                filename = f"{sanitized_word}_{source}_{original_filename}"
-                destination_path = os.path.join(SELECTED_SYMBOLS_DIR, filename)
-                shutil.copy(original_filepath, destination_path)
-
-            elif "url" in symbol:
-                response = requests.get(symbol["url"], stream=True, timeout=10)
-                response.raise_for_status()
-                base_name = os.path.basename(symbol["url"].split("?")[0])
-                if not os.path.splitext(base_name)[1]:
-                    base_name += ".png"
-                filename = f"{sanitized_word}_{source}_{base_name}"
-                with open(os.path.join(SELECTED_SYMBOLS_DIR, filename), "wb") as f:
-                    shutil.copyfileobj(response.raw, f)
+                shutil.copy(symbol["path"], destination_path)
             else:
-                raise FileNotFoundError(
-                    f"Symbol data is missing 'path' or 'url': {symbol}"
-                )
+                image_obj = self._get_image_obj(data, data_type)
+                if image_obj:
+                    self._save_pil_image(image_obj, destination_path)
+                else:
+                    raise ValueError("Could not get image data to save.")
 
-            self._commit_symbol(filename, symbol["name"], source, symbol.get("original_filename", "N/A"))
+            symbol_data_list = [
+                {
+                    "name": symbol["name"],
+                    "source": source,
+                    "original_filename": original_filename,
+                }
+            ]
+            symbol_data_json = json.dumps(symbol_data_list)
+
+            self._commit_symbol(
+                final_filename, symbol["name"], source, symbol_data_json
+            )
         except Exception as e:
             messagebox.showerror("Error", f"Could not save symbol: {e}")
+
+    def add_to_selection(self, symbol, source, data, data_type):
+        """Adds a symbol to the current selection list and updates the preview."""
+        try:
+            image_obj = self._get_image_obj(data, data_type)
+            if image_obj:
+                selection_data = {
+                    "symbol_info": symbol,
+                    "source": source,
+                    "image_obj": image_obj.convert("RGBA"),
+                }
+                self.current_selection.append(selection_data)
+                self.update_selection_preview()
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not add symbol to selection: {e}")
+
+    def update_selection_preview(self):
+        for widget in self.selection_preview_frame.winfo_children():
+            widget.destroy()
+        for item in self.current_selection:
+            image = item["image_obj"]
+            ctk_image = ctk.CTkImage(light_image=image, size=(80, 80))
+            preview_label = ctk.CTkLabel(
+                self.selection_preview_frame,
+                image=ctk_image,
+                text=item["symbol_info"]["name"][:20],
+                compound="top",
+            )
+            preview_label.pack(side="left", padx=10, pady=5)
+
+    def clear_selection(self):
+        self.current_selection.clear()
+        self.update_selection_preview()
+
+    def _get_image_obj(self, data, data_type):
+        """Helper to convert various data types into a PIL Image object."""
+        if data_type == "image_obj":
+            return data
+        if data_type == "svg_path":
+            png_data = cairosvg.svg2png(url=data)
+            return Image.open(BytesIO(png_data))
+        elif data_type in ["raster_data", "png_data"]:
+            return Image.open(BytesIO(data))
+        return None
+
+    def _save_pil_image(self, image_obj, destination_path):
+        """Helper to save a PIL Image object, handling transparency correctly."""
+        os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+        if image_obj.mode == "RGBA":
+            background = Image.new("RGB", image_obj.size, (255, 255, 255))
+            background.paste(image_obj, mask=image_obj.split()[3])
+            background.save(destination_path, "PNG")
+        else:
+            image_obj.convert("RGB").save(destination_path, "PNG")
 
     def next_word(self):
         if self.current_index < len(self.output_df) - 1:
             self.current_index += 1
             self.search_for_symbols()
+            self.clear_selection()
         else:
             messagebox.showinfo(
                 "End of List", "You are at the end of the vocabulary list."
@@ -1401,11 +1675,11 @@ class SymbolPickerPage:
         if self.current_index > 0:
             self.current_index -= 1
             self.search_for_symbols()
+            self.clear_selection()
 
     def auto_save(self):
-        if not self.autosave_var.get():
-            return
-        self.save_to_current_file()
+        if self.autosave_var.get():
+            self.save_to_current_file()
 
     def save_to_current_file(self):
         try:
@@ -1481,6 +1755,8 @@ class SymbolPickerPage:
     def search_picom(self, query):
         try:
             df = self.picom_df.copy()
+            if df.empty:
+                return []
             df["score"] = df["name"].apply(
                 lambda x: fuzz.token_sort_ratio(query, str(x))
             )
@@ -1501,6 +1777,8 @@ class SymbolPickerPage:
     def search_sclera(self, query):
         try:
             df = self.sclera_df.copy()
+            if df.empty:
+                return []
             df["score"] = df["search_term"].apply(
                 lambda x: fuzz.token_sort_ratio(query, str(x))
             )
@@ -1602,9 +1880,13 @@ class SymbolPickerPage:
                 with open(local_filepath, "wb") as f:
                     f.write(img_response.content)
                 metadata_row = item.copy()
-                metadata_row["search_term"] = query
-                metadata_row["search_index"] = current_index
-                metadata_row["local_filename"] = local_filename
+                metadata_row.update(
+                    {
+                        "search_term": query,
+                        "search_index": current_index,
+                        "local_filename": local_filename,
+                    }
+                )
                 new_metadata_rows.append(metadata_row)
                 yield {
                     "name": item.get("keywords", [{}])[0].get("keyword", "N/A"),
@@ -1684,4 +1966,3 @@ if __name__ == "__main__":
     root = ctk.CTk()
     app = SymbolPickerApp(root)
     root.mainloop()
-
