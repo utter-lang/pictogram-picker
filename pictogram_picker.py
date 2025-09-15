@@ -39,6 +39,47 @@ ARASAAC_CACHE_DIR = "arasaac_symbols"  # Directory for local ARASAAC symbols
 MAX_GRID_COLUMNS = 4
 
 
+class FormatSelectionDialog(ctk.CTkToplevel):
+    """A dialog to ask the user which CSV format to use."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.title("Select Format")
+        self.lift()
+        self.attributes("-topmost", True)
+        self.grab_set()
+        self.geometry("350x150")
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
+        self.result = None
+
+        self.label = ctk.CTkLabel(self, text="Please select the CSV format to use:")
+        self.label.pack(padx=20, pady=20)
+
+        button_frame = ctk.CTkFrame(self, fg_color="transparent")
+        button_frame.pack(pady=10)
+
+        self.legacy_button = ctk.CTkButton(button_frame, text="Legacy Esperanto", command=self.on_legacy)
+        self.legacy_button.pack(side="left", padx=10)
+
+        self.new_button = ctk.CTkButton(button_frame, text="New English Diversity", command=self.on_new)
+        self.new_button.pack(side="left", padx=10)
+
+    def on_legacy(self):
+        self.result = "legacy"
+        self.destroy()
+
+    def on_new(self):
+        self.result = "new"
+        self.destroy()
+        
+    def _on_closing(self):
+        self.result = None
+        self.destroy()
+
+    def get_choice(self):
+        self.master.wait_window(self)
+        return self.result
+
+
 class SymbolPickerApp:
     """The main application controller."""
 
@@ -48,6 +89,30 @@ class SymbolPickerApp:
         self.root.attributes("-zoomed", True)
         self.root.grid_columnconfigure(0, weight=1)
         self.root.grid_rowconfigure(1, weight=1)
+
+        # --- Ask for CSV Format at Startup ---
+        dialog = FormatSelectionDialog(self.root)
+        choice = dialog.get_choice()
+
+        if choice == "legacy":
+            csv_path = "Gabe_Esperanto cards_filtered_cleaned_no_starters_no_jn_rerank.csv"
+            english_col = "english"
+        elif choice == "new":
+            csv_path = "en_word_diversity_ranking.csv"
+            english_col = " Word"  # Note the leading space
+        else:
+            self.root.destroy()  # Exit if no choice is made
+            return
+
+        try:
+            self.base_vocab_df = pd.read_csv(csv_path)
+            if choice == "new":
+                # Rename the column to 'english' for consistency throughout the app
+                self.base_vocab_df.rename(columns={english_col: "english"}, inplace=True)
+        except FileNotFoundError as e:
+            messagebox.showerror("Error", f"Could not find required file: {e.filename}")
+            self.root.destroy()
+            return
 
         # --- Header Frame for Persistent Buttons ---
         self.header_frame = ctk.CTkFrame(self.root, fg_color="transparent")
@@ -73,15 +138,6 @@ class SymbolPickerApp:
         self.container.grid(row=1, column=0, sticky="nsew")
         self.container.grid_columnconfigure(0, weight=1)
         self.container.grid_rowconfigure(0, weight=1)
-
-        try:
-            self.base_vocab_df = pd.read_csv(
-                "Gabe_Esperanto cards_filtered_cleaned_no_starters_no_jn_rerank.csv"
-            )
-        except FileNotFoundError as e:
-            messagebox.showerror("Error", f"Could not find required file: {e.filename}")
-            self.root.destroy()
-            return
 
         self.start_page = StartPage(self.container, self)
         self.symbol_picker_page = None
@@ -634,7 +690,10 @@ class SymbolPickerPage:
                         final_height = display_size_max
                         final_width = int(display_size_max * aspect_ratio)
 
-                    resized_image = image.resize((max(1, final_width), max(1, final_height)), Image.LANCZOS,)
+                    resized_image = image.resize(
+                        (max(1, final_width), max(1, final_height)),
+                        Image.Resampling.LANCZOS,
+                    )
 
                     padded_image = Image.new(
                         "RGBA", (display_size_max, display_size_max), (0, 0, 0, 0)
@@ -812,7 +871,10 @@ class SymbolPickerPage:
                     final_height = current_size
                     final_width = int(current_size * aspect_ratio)
 
-                resized_image = image.resize((max(1, final_width), max(1, final_height)), Image.LANCZOS,)
+                resized_image = image.resize(
+                    (max(1, final_width), max(1, final_height)),
+                    Image.Resampling.LANCZOS,
+                )
 
                 padded_image = Image.new(
                     "RGBA", (current_size, current_size), (0, 0, 0, 0)
