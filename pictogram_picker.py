@@ -15,8 +15,7 @@ import ast
 import time
 import platform
 import json
-import platform  # Make sure this is at the top of your file
-import json  # And this one too
+import unicodedata  # --- NEW --- Import the unicodedata library
 
 # --- UI Sizing Constants ---
 UI_SCALE = 1.25
@@ -224,9 +223,6 @@ class TextSymbolDialog(ctk.CTkToplevel):
             )
             return self._get_system_fonts_fallback()
 
-        # --- NEW: Logic to limit the number of fonts in the dropdown ---
-
-        # 1. Prioritize essential fonts for Unicode/emoji
         preferred_map = {}
         preferred_names = [
             "Noto Color Emoji",
@@ -239,7 +235,6 @@ class TextSymbolDialog(ctk.CTkToplevel):
                 if pref_name.lower() in name.lower():
                     preferred_map[name] = path
 
-        # 2. Get the rest of the fonts, sorted alphabetically
         remaining_map = {
             name: path
             for name, path in full_font_map.items()
@@ -247,7 +242,6 @@ class TextSymbolDialog(ctk.CTkToplevel):
         }
         sorted_remaining = sorted(remaining_map.items())
 
-        # 3. Combine them, ensuring preferred are first, and limit the total
         final_font_map = dict(preferred_map)
         limit = 20 - len(final_font_map)
         for name, path in sorted_remaining[:limit]:
@@ -338,6 +332,56 @@ class TextSymbolDialog(ctk.CTkToplevel):
         self.destroy()
 
     def get_result(self):
+        self.master.wait_window(self)
+        return self.result
+
+
+# --- NEW --- Custom dialog for naming symbols, replacing the limited CTkInputDialog.
+class SymbolNameDialog(ctk.CTkToplevel):
+    """A dialog to ask the user for a symbol name, with a pre-filled suggestion."""
+
+    def __init__(
+        self, master, title="Name Symbol", prompt="Enter a name:", initial_value=""
+    ):
+        super().__init__(master)
+        self.title(title)
+        self.lift()
+        self.attributes("-topmost", True)
+        self.grab_set()
+        self.geometry("400x150")
+        self.protocol("WM_DELETE_WINDOW", self._on_cancel)
+        self.result = None
+
+        self.label = ctk.CTkLabel(self, text=prompt)
+        self.label.pack(padx=20, pady=(20, 10))
+
+        self.entry = ctk.CTkEntry(self, width=360)
+        self.entry.pack(padx=20, pady=(0, 10))
+        self.entry.insert(0, initial_value)
+        self.entry.focus_set()
+        self.entry.bind("<Return>", self._on_ok)
+
+        button_frame = ctk.CTkFrame(self, fg_color="transparent")
+        button_frame.pack(pady=10)
+
+        self.ok_button = ctk.CTkButton(button_frame, text="OK", command=self._on_ok)
+        self.ok_button.pack(side="left", padx=10)
+
+        self.cancel_button = ctk.CTkButton(
+            button_frame, text="Cancel", command=self._on_cancel, fg_color="gray50"
+        )
+        self.cancel_button.pack(side="left", padx=10)
+
+    def _on_ok(self, event=None):
+        self.result = self.entry.get()
+        self.destroy()
+
+    def _on_cancel(self):
+        self.result = None
+        self.destroy()
+
+    def get_input(self):
+        """Waits for the dialog to be closed and returns the result."""
         self.master.wait_window(self)
         return self.result
 
@@ -559,9 +603,7 @@ class SymbolPickerPage:
         self.controller = controller
         self.autosave_var = ctk.BooleanVar(value=True)
         self.multi_select_mode = ctk.BooleanVar(value=False)
-        self.separator_font_path = (
-            self._find_system_font()
-        )  # <-- NEW: Find a reliable font on startup
+        self.separator_font_path = self._find_system_font()
 
         self.source_column_map = {
             "Mulberry": 0,
@@ -674,7 +716,7 @@ class SymbolPickerPage:
                 )
                 self.bliss_df = pd.DataFrame()
 
-            # --- MODIFIED --- Pre-load Noto Emoji metadata with clean names
+            # Pre-load Noto Emoji metadata from JSON
             print("Loading Noto Emoji metadata...")
             noto_metadata_path = "noto-emoji/emoji_17_0_ordering.json"
             noto_data = []
@@ -683,7 +725,12 @@ class SymbolPickerPage:
                     metadata = json.load(f)
                     for group in metadata:
                         for emoji in group.get("emoji", []):
-                            hex_parts = [hex(cp)[2:] for cp in emoji.get("base", [])]
+                            # --- FIX --- Filter out 'fe0f' variation selector from filenames
+                            hex_parts = [
+                                hex(cp)[2:]
+                                for cp in emoji.get("base", [])
+                                if hex(cp)[2:] != "fe0f"
+                            ]
                             if not hex_parts:
                                 continue
 
@@ -693,9 +740,7 @@ class SymbolPickerPage:
                             if not shortcodes:
                                 continue
 
-                            # Keep original shortcodes for better searching
                             search_terms_with_colons = " ".join(shortcodes)
-                            # Create a clean name for display/saving by stripping colons
                             clean_display_name = shortcodes[0].strip(":")
 
                             noto_data.append(
@@ -1141,15 +1186,60 @@ class SymbolPickerPage:
         self.note_entry.delete(0, "end")
         self.auto_save()
 
+    # --- MODIFIED --- This function now handles automatic naming and user confirmation.
     def create_text_symbol(self):
         user_text = self.text_symbol_entry.get().strip()
         if not user_text:
             return
-        dialog = TextSymbolDialog(self.root, text_to_render=user_text)
-        final_image = dialog.get_result()
+
+        # Automatically suggest a name using Unicode data
+        suggested_name = ""
+        # Try to get the official Unicode name if it's a single character
+        if len(user_text) == 1:
+            try:
+                # e.g., '↪' -> 'RIGHTWARDS ARROW WITH HOOK'
+                name = unicodedata.name(user_text)
+                # -> 'rightwards_arrow_with_hook'
+                suggested_name = name.lower().replace(" ", "_")
+            except (TypeError, ValueError):
+                # Fallback for characters without a name or non-character strings
+                suggested_name = user_text.replace(" ", "_")
+        else:
+            # Fallback for multi-character strings
+            suggested_name = user_text.replace(" ", "_")
+
+        # Use the new custom dialog to ask the user to confirm or edit the symbol name
+        dialog = SymbolNameDialog(
+            self.root,
+            title="Name Custom Symbol",
+            prompt="Please confirm the name for this symbol:",
+            initial_value=suggested_name,
+        )
+
+        symbol_name = dialog.get_input()
+
+        # If the user cancelled or entered nothing, stop
+        if not symbol_name:
+            return
+
+        # Now open the visual editor dialog
+        style_dialog = TextSymbolDialog(self.root, text_to_render=user_text)
+        final_image = style_dialog.get_result()
 
         if final_image:
-            symbol_info = {"name": user_text, "original_filename": "custom_text.png"}
+            # Sanitize the name for use in a filename
+            safe_filename_name = (
+                "".join(c for c in symbol_name if c.isalnum() or c in " _-")
+                .strip()
+                .replace(" ", "_")
+            )
+
+            original_filename = f"{safe_filename_name}.png"
+
+            symbol_info = {
+                "name": symbol_name,  # The full name for the CSV
+                "original_filename": original_filename,  # The sanitized name for the file
+            }
 
             if self.multi_select_mode.get():
                 self.add_to_selection(
@@ -1851,20 +1941,17 @@ class SymbolPickerPage:
             print(f"Error searching OpenMoji: {e}")
             return []
 
-    # --- MODIFIED --- Noto Emoji search function now uses the clean display name
     def search_noto_emoji(self, query):
         try:
             if self.noto_df.empty:
                 return []
             df = self.noto_df.copy()
-            # Score based on how well the query matches the emoji shortcodes (with colons)
             df["score"] = df["search_terms"].apply(
                 lambda x: fuzz.token_sort_ratio(query, str(x))
             )
-            # Return the top 4 results
             return [
                 {
-                    "name": row["display_name"],  # Use the clean name for the UI
+                    "name": row["display_name"],
                     "path": os.path.join("noto-emoji", row["filename"]),
                     "original_filename": row["filename"],
                 }
@@ -2090,3 +2177,4 @@ if __name__ == "__main__":
     root = ctk.CTk()
     app = SymbolPickerApp(root)
     root.mainloop()
+    
