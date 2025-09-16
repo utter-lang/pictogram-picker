@@ -132,16 +132,31 @@ class TextSymbolDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(controls_frame, text="Font:").grid(row=0, column=0, padx=5, pady=5)
         self.font_selector = ctk.CTkComboBox(
-            controls_frame, values=self.font_names, command=self.update_preview
+            controls_frame,
+            values=self.font_names,
+            command=self.update_preview,
+            width=400,
         )
 
-        default_font = "Arial"
-        if default_font not in self.font_names:
-            arial_variants = [f for f in self.font_names if "arial" in f.lower()]
-            if arial_variants:
-                default_font = arial_variants[0]
-            else:
-                default_font = self.font_names[0]
+        preferred_fonts = [
+            "Noto Color Emoji",  # Best for Linux emoji
+            "Noto Sans Symbols",  # Best for Linux symbols
+            "Segoe UI Emoji",  # Best for Windows
+            "Apple Color Emoji",  # Best for macOS
+            "Arial Unicode MS",
+            "DejaVu Sans",
+        ]
+
+        default_font = self.font_names[0]
+        for font_name in preferred_fonts:
+            matching_fonts = [
+                f for f in self.font_names if font_name.lower() in f.lower()
+            ]
+            if matching_fonts:
+                default_font = matching_fonts[0]
+                print(f"Found preferred font for text symbols: {default_font}")
+                break
+
         self.font_selector.set(default_font)
         self.font_selector.grid(
             row=0, column=1, columnspan=2, padx=5, pady=5, sticky="ew"
@@ -178,18 +193,77 @@ class TextSymbolDialog(ctk.CTkToplevel):
         )
         self.cancel_button.pack(side="left", padx=10)
 
-        self.update_preview()  # Initial render
+        self.update_preview()
 
     def _get_system_fonts(self):
-        """Scans common directories for fonts and returns a map of their names to paths."""
+        """Scans for system fonts and returns a curated list."""
+        print("Scanning for system fonts...")
+        full_font_map = {}
+        try:
+            from matplotlib.font_manager import findSystemFonts, get_font
+
+            font_paths = findSystemFonts()
+            for font_path in font_paths:
+                try:
+                    font = get_font(font_path)
+                    display_name = font.family_name
+
+                    style = font.style_name
+                    if style.lower() not in ["regular", "normal", "book"]:
+                        display_name = f"{display_name} {style}"
+
+                    if display_name not in full_font_map:
+                        full_font_map[display_name] = font_path
+                except Exception:
+                    continue
+            print(f"Found {len(full_font_map)} total unique font families.")
+        except ImportError:
+            messagebox.showwarning(
+                "Matplotlib not found",
+                "Please install matplotlib (`pip install matplotlib`) for the best font support.",
+            )
+            return self._get_system_fonts_fallback()
+
+        # --- NEW: Logic to limit the number of fonts in the dropdown ---
+
+        # 1. Prioritize essential fonts for Unicode/emoji
+        preferred_map = {}
+        preferred_names = [
+            "Noto Color Emoji",
+            "Noto Sans Symbols",
+            "Segoe UI Emoji",
+            "Apple Color Emoji",
+        ]
+        for name, path in full_font_map.items():
+            for pref_name in preferred_names:
+                if pref_name.lower() in name.lower():
+                    preferred_map[name] = path
+
+        # 2. Get the rest of the fonts, sorted alphabetically
+        remaining_map = {
+            name: path
+            for name, path in full_font_map.items()
+            if name not in preferred_map
+        }
+        sorted_remaining = sorted(remaining_map.items())
+
+        # 3. Combine them, ensuring preferred are first, and limit the total
+        final_font_map = dict(preferred_map)
+        limit = 20 - len(final_font_map)
+        for name, path in sorted_remaining[:limit]:
+            final_font_map[name] = path
+
+        print(f"Limiting dropdown to {len(final_font_map)} fonts.")
+        return dict(sorted(final_font_map.items()))
+
+    def _get_system_fonts_fallback(self):
         font_map = {}
         system = platform.system()
-
         if system == "Windows":
             font_dirs = [
                 os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "Fonts")
             ]
-        elif system == "Darwin":  # macOS
+        elif system == "Darwin":
             font_dirs = [
                 "/System/Library/Fonts",
                 "/Library/Fonts",
@@ -219,7 +293,6 @@ class TextSymbolDialog(ctk.CTkToplevel):
                                 font_map[display_name] = font_path
                         except Exception:
                             continue
-
         return dict(sorted(font_map.items()))
 
     def update_preview(self, *args):
@@ -227,17 +300,21 @@ class TextSymbolDialog(ctk.CTkToplevel):
         selected_font_name = self.font_selector.get()
         font_path = self.font_map.get(selected_font_name)
 
-        image = Image.new("RGB", (self.img_size, self.img_size), "white")
+        image = Image.new("RGBA", (self.img_size, self.img_size), (255, 255, 255, 255))
         draw = ImageDraw.Draw(image)
 
         font = None
         try:
             if font_path:
-                font = ImageFont.truetype(font_path, font_size)
+                font = ImageFont.truetype(
+                    font_path, font_size, layout_engine=ImageFont.Layout.RAQM
+                )
             else:
                 font = ImageFont.load_default()
         except IOError:
             font = ImageFont.load_default()
+        except ImportError:
+            font = ImageFont.truetype(font_path, font_size)
 
         bbox = draw.textbbox((0, 0), self.text_to_render, font=font)
         text_width = bbox[2] - bbox[0]
@@ -577,7 +654,7 @@ class SymbolPickerPage:
 
             # Pre-load Bliss Symbols from the pre-processed folder
             print("Loading Bliss symbols...")
-            bliss_path = "bliss_1000x1000_padded"
+            bliss_path = "bliss_h1000_bmp_padded"
             bliss_data = []
             if os.path.isdir(bliss_path):
                 for filename in os.listdir(bliss_path):
@@ -668,7 +745,7 @@ class SymbolPickerPage:
         )
 
         IMG_SIZE = 512
-        SEPARATOR_WIDTH = 100
+        SEPARATOR_WIDTH = 400
 
         separator_image = Image.new("RGBA", (SEPARATOR_WIDTH, IMG_SIZE), (0, 0, 0, 0))
         draw = ImageDraw.Draw(separator_image)
@@ -906,7 +983,7 @@ class SymbolPickerPage:
         self.existing_symbol_frame.grid_columnconfigure(0, weight=1)
         self.existing_symbol_label = ctk.CTkLabel(self.existing_symbol_frame, text="")
         self.existing_symbol_label.pack(pady=int(PADDING_LARGE * UI_SCALE), expand=True)
-        self.existing_symbol_info = ctk.CTkLabel(
+        self.existing_symbol_info = ctk.CTkLabel(   
             self.existing_symbol_frame, text="", font=self.normal_font
         )
         self.existing_symbol_info.pack(pady=int(PADDING_NORMAL * UI_SCALE))
@@ -1117,7 +1194,7 @@ class SymbolPickerPage:
         if "symbol_filename" in self.output_df.columns and pd.notna(
             self.output_df.loc[self.current_index, "symbol_filename"]
         ):
-            self.show_existing_symbol()
+            self.show_existing_symbol() 
         else:
             self.refresh_symbol_grid()
 
@@ -1132,37 +1209,35 @@ class SymbolPickerPage:
                 row["symbol_source"],
             )
             filepath = os.path.join(SELECTED_SYMBOLS_DIR, filename)
-            display_size_max = int(256 * UI_SCALE)
+            display_height = int(256 * UI_SCALE)
             final_image_for_display = None
+            final_width, final_height = display_height, display_height
 
             if filepath.endswith(".svg"):
-                # This should now work because the file is a real SVG
+                # For SVGs, we can render them directly to the target square size
                 image_data = cairosvg.svg2png(
                     url=filepath,
-                    output_width=display_size_max,
-                    output_height=display_size_max,
+                    output_width=display_height,
+                    output_height=display_height,
                 )
                 final_image_for_display = Image.open(BytesIO(image_data))
             else:
                 image = Image.open(filepath)
-                image.thumbnail(
-                    (display_size_max, display_size_max), Image.Resampling.LANCZOS
-                )
-                padded_image = Image.new(
-                    "RGBA", (display_size_max, display_size_max), (0, 0, 0, 0)
-                )
-                paste_pos = (
-                    (display_size_max - image.width) // 2,
-                    (display_size_max - image.height) // 2,
-                )
-                padded_image.paste(
-                    image, paste_pos, image if image.mode == "RGBA" else None
-                )
-                final_image_for_display = padded_image
+                original_width, original_height = image.size
+                
+                # --- FIX: Calculate proportional width based on a fixed height ---
+                aspect_ratio = original_width / original_height
+                final_height = display_height
+                final_width = int(final_height * aspect_ratio)
+                
+                # Resize the image proportionally to the new dimensions
+                resized_image = image.resize((final_width, final_height), Image.Resampling.LANCZOS)
+                final_image_for_display = resized_image
 
+            # Use the calculated final width and height for the CTkImage
             ctk_image = ctk.CTkImage(
                 light_image=final_image_for_display,
-                size=(display_size_max, display_size_max),
+                size=(final_width, final_height), # <-- Use new proportional dimensions
             )
             self.existing_symbol_label.configure(image=ctk_image, text="")
             self.existing_symbol_info.configure(
@@ -1173,7 +1248,7 @@ class SymbolPickerPage:
                 image=None, text=f"Error loading symbol:\n{e}"
             )
             self.existing_symbol_info.configure(text="")
-
+            
     def refresh_symbol_grid(self):
         self.existing_symbol_frame.grid_remove()
         self.scrollable_frame.grid(row=2, column=0, sticky="nsew")
