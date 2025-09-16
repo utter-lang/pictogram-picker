@@ -567,13 +567,13 @@ class SymbolPickerPage:
             "Mulberry": 0,
             "OpenMoji": 0,
             "Picom": 0,
+            "Noto Emoji": 0,
             "Flaticon": 0,
             "Sclera": 1,
             "Bliss": 1,
             "ARASAAC": 1,
         }
 
-        # --- (The rest of the __init__ method remains the same) ---
         # --- ARASAAC Caching Setup ---
         self.arasaac_metadata_path = os.path.join(ARASAAC_CACHE_DIR, "metadata.csv")
         os.makedirs(ARASAAC_CACHE_DIR, exist_ok=True)
@@ -674,6 +674,45 @@ class SymbolPickerPage:
                 )
                 self.bliss_df = pd.DataFrame()
 
+            # --- MODIFIED --- Pre-load Noto Emoji metadata with clean names
+            print("Loading Noto Emoji metadata...")
+            noto_metadata_path = "noto-emoji/emoji_17_0_ordering.json"
+            noto_data = []
+            if os.path.exists(noto_metadata_path):
+                with open(noto_metadata_path, "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
+                    for group in metadata:
+                        for emoji in group.get("emoji", []):
+                            hex_parts = [hex(cp)[2:] for cp in emoji.get("base", [])]
+                            if not hex_parts:
+                                continue
+
+                            filename = f"emoji_u{'_'.join(hex_parts)}.png"
+
+                            shortcodes = emoji.get("shortcodes", [])
+                            if not shortcodes:
+                                continue
+
+                            # Keep original shortcodes for better searching
+                            search_terms_with_colons = " ".join(shortcodes)
+                            # Create a clean name for display/saving by stripping colons
+                            clean_display_name = shortcodes[0].strip(":")
+
+                            noto_data.append(
+                                {
+                                    "search_terms": search_terms_with_colons,
+                                    "display_name": clean_display_name,
+                                    "filename": filename,
+                                }
+                            )
+                self.noto_df = pd.DataFrame(noto_data)
+                print(f"Loaded metadata for {len(self.noto_df)} Noto Emojis.")
+            else:
+                self.noto_df = pd.DataFrame()
+                print(
+                    f"Warning: Noto Emoji metadata file not found at '{noto_metadata_path}'."
+                )
+
         except FileNotFoundError as e:
             messagebox.showerror(
                 "Error",
@@ -684,7 +723,6 @@ class SymbolPickerPage:
 
         self.setup_gui()
 
-    # --- NEW HELPER FUNCTION TO FIND A FONT ---
     def _find_system_font(self):
         """Find a reliable TTF font path on the current OS."""
         system = platform.system()
@@ -750,14 +788,11 @@ class SymbolPickerPage:
         separator_image = Image.new("RGBA", (SEPARATOR_WIDTH, IMG_SIZE), (0, 0, 0, 0))
         draw = ImageDraw.Draw(separator_image)
 
-        # --- UPDATED FONT LOGIC ---
         try:
-            # Use the pre-found font path and the new, larger size
-            font_size = 200  # <-- INCREASED SIZE
+            font_size = 200
             if self.separator_font_path:
                 font = ImageFont.truetype(self.separator_font_path, font_size)
             else:
-                # Fallback if no font was found at all
                 font = ImageFont.load_default()
         except IOError:
             font = ImageFont.load_default()
@@ -797,21 +832,18 @@ class SymbolPickerPage:
         self.toggle_multi_select_mode()
         self.next_word()
 
-    # --- (The rest of the SymbolPickerPage class remains the same) ---
-    # (reload, setup_gui, disable_root_key_bindings, etc... all the way to the end)
     def reload(self, output_filename, dataframe, start_index=0):
         self.output_filename = output_filename
         self.output_df = dataframe
         self.current_index = start_index
         self.symbol_buttons, self.cached_results = [], {}
-        self.symbol_buttons_data = []  # <-- Store data for keyboard nav
+        self.symbol_buttons_data = []
         self.selected_index, self.current_search_id = -1, 0
         self.source_frames = {}
         self.source_counters = {}
         self.column_row_counters = {0: 0, 1: 0}
         self.results_queue = Queue()
         self.current_selection = []
-        # Navigation grid attributes
         self.nav_grid_dirty = True
         self.nav_grid = []
         self.button_to_coords = {}
@@ -983,7 +1015,7 @@ class SymbolPickerPage:
         self.existing_symbol_frame.grid_columnconfigure(0, weight=1)
         self.existing_symbol_label = ctk.CTkLabel(self.existing_symbol_frame, text="")
         self.existing_symbol_label.pack(pady=int(PADDING_LARGE * UI_SCALE), expand=True)
-        self.existing_symbol_info = ctk.CTkLabel(   
+        self.existing_symbol_info = ctk.CTkLabel(
             self.existing_symbol_frame, text="", font=self.normal_font
         )
         self.existing_symbol_info.pack(pady=int(PADDING_NORMAL * UI_SCALE))
@@ -1023,7 +1055,7 @@ class SymbolPickerPage:
             fg_color="gray50",
         )
         self.clear_button.pack(side="left", padx=5)
-        self.selection_frame.grid_forget()  # Hide by default
+        self.selection_frame.grid_forget()
 
         nav_frame = ctk.CTkFrame(self.main_frame)
         nav_frame.grid(
@@ -1151,10 +1183,10 @@ class SymbolPickerPage:
             source,
             symbol_data_json,
             "",
-        ]  # Clear old original_filename column
+        ]
 
         self.auto_save()
-        if not self.multi_select_mode.get():  # Only auto-advance in single mode
+        if not self.multi_select_mode.get():
             self.next_word()
 
     def get_current_icon_size(self):
@@ -1180,6 +1212,7 @@ class SymbolPickerPage:
             "Mulberry",
             "OpenMoji",
             "Picom",
+            "Noto Emoji",
             "Sclera",
             "Bliss",
             "ARASAAC",
@@ -1194,7 +1227,7 @@ class SymbolPickerPage:
         if "symbol_filename" in self.output_df.columns and pd.notna(
             self.output_df.loc[self.current_index, "symbol_filename"]
         ):
-            self.show_existing_symbol() 
+            self.show_existing_symbol()
         else:
             self.refresh_symbol_grid()
 
@@ -1214,7 +1247,6 @@ class SymbolPickerPage:
             final_width, final_height = display_height, display_height
 
             if filepath.endswith(".svg"):
-                # For SVGs, we can render them directly to the target square size
                 image_data = cairosvg.svg2png(
                     url=filepath,
                     output_width=display_height,
@@ -1224,20 +1256,19 @@ class SymbolPickerPage:
             else:
                 image = Image.open(filepath)
                 original_width, original_height = image.size
-                
-                # --- FIX: Calculate proportional width based on a fixed height ---
+
                 aspect_ratio = original_width / original_height
                 final_height = display_height
                 final_width = int(final_height * aspect_ratio)
-                
-                # Resize the image proportionally to the new dimensions
-                resized_image = image.resize((final_width, final_height), Image.Resampling.LANCZOS)
+
+                resized_image = image.resize(
+                    (final_width, final_height), Image.Resampling.LANCZOS
+                )
                 final_image_for_display = resized_image
 
-            # Use the calculated final width and height for the CTkImage
             ctk_image = ctk.CTkImage(
                 light_image=final_image_for_display,
-                size=(final_width, final_height), # <-- Use new proportional dimensions
+                size=(final_width, final_height),
             )
             self.existing_symbol_label.configure(image=ctk_image, text="")
             self.existing_symbol_info.configure(
@@ -1248,7 +1279,7 @@ class SymbolPickerPage:
                 image=None, text=f"Error loading symbol:\n{e}"
             )
             self.existing_symbol_info.configure(text="")
-            
+
     def refresh_symbol_grid(self):
         self.existing_symbol_frame.grid_remove()
         self.scrollable_frame.grid(row=2, column=0, sticky="nsew")
@@ -1267,6 +1298,7 @@ class SymbolPickerPage:
         self.process_local_search_batch(self.search_mulberry(query), "Mulberry")
         self.process_local_search_batch(self.search_openmoji(query), "OpenMoji")
         self.process_local_search_batch(self.search_picom(query), "Picom")
+        self.process_local_search_batch(self.search_noto_emoji(query), "Noto Emoji")
         self.process_local_search_batch(self.search_sclera(query), "Sclera")
         self.process_local_search_batch(self.search_bliss(query), "Bliss")
         arasaac_cache_results = self.check_arasaac_cache(query, self.current_index)
@@ -1621,10 +1653,7 @@ class SymbolPickerPage:
             else:
                 button.configure(border_width=0)
 
-    # +++ LOGIC FOR MODE-SWITCHING AND SELECTION +++
-
     def toggle_multi_select_mode(self):
-        """Switches between single and multi-symbol selection modes."""
         is_multi = not self.multi_select_mode.get()
         self.multi_select_mode.set(is_multi)
 
@@ -1640,14 +1669,12 @@ class SymbolPickerPage:
             self.clear_selection()
 
     def handle_symbol_click(self, symbol, source, data, data_type):
-        """Central handler that directs action based on the current selection mode."""
         if self.multi_select_mode.get():
             self.add_to_selection(symbol, source, data, data_type)
         else:
             self.select_single_symbol(symbol, source, data, data_type)
 
     def select_single_symbol(self, symbol, source, data, data_type):
-        """Saves a single selected symbol and advances to the next item."""
         try:
             os.makedirs(SELECTED_SYMBOLS_DIR, exist_ok=True)
             sanitized_word = (
@@ -1683,7 +1710,6 @@ class SymbolPickerPage:
             messagebox.showerror("Error", f"Could not save symbol: {e}")
 
     def add_to_selection(self, symbol, source, data, data_type):
-        """Adds a symbol to the current selection list and updates the preview."""
         try:
             image_obj = self._get_image_obj(data, data_type)
             if image_obj:
@@ -1716,7 +1742,6 @@ class SymbolPickerPage:
         self.update_selection_preview()
 
     def _get_image_obj(self, data, data_type):
-        """Helper to convert various data types into a PIL Image object."""
         if data_type == "image_obj":
             return data
         if data_type == "svg_path":
@@ -1727,7 +1752,6 @@ class SymbolPickerPage:
         return None
 
     def _save_pil_image(self, image_obj, destination_path):
-        """Helper to save a PIL Image object, handling transparency correctly."""
         os.makedirs(os.path.dirname(destination_path), exist_ok=True)
         if image_obj.mode == "RGBA":
             background = Image.new("RGB", image_obj.size, (255, 255, 255))
@@ -1825,6 +1849,31 @@ class SymbolPickerPage:
             ]
         except Exception as e:
             print(f"Error searching OpenMoji: {e}")
+            return []
+
+    # --- MODIFIED --- Noto Emoji search function now uses the clean display name
+    def search_noto_emoji(self, query):
+        try:
+            if self.noto_df.empty:
+                return []
+            df = self.noto_df.copy()
+            # Score based on how well the query matches the emoji shortcodes (with colons)
+            df["score"] = df["search_terms"].apply(
+                lambda x: fuzz.token_sort_ratio(query, str(x))
+            )
+            # Return the top 4 results
+            return [
+                {
+                    "name": row["display_name"],  # Use the clean name for the UI
+                    "path": os.path.join("noto-emoji", row["filename"]),
+                    "original_filename": row["filename"],
+                }
+                for _, row in df.sort_values(by="score", ascending=False)
+                .head(4)
+                .iterrows()
+            ]
+        except Exception as e:
+            print(f"Error searching Noto Emoji: {e}")
             return []
 
     def search_picom(self, query):
